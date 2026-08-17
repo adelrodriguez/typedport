@@ -1,0 +1,16 @@
+{
+  "extends": "adamantite/typescript",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "lib": ["ESNext"],
+    "module": "Preserve",
+    "moduleDetection": "force",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "target": "ESNext",
+    "types": ["bun"],
+    "verbatimModuleSyntax": true
+  },
+  "exclude": ["node_modules", "dist", ".packref"],
+  "include": ["src", "*.config.ts"]
+}
