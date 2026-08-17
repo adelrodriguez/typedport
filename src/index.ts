@@ -1,4 +1,4 @@
-export { createClient } from "./client"
+export { createClient } from "./lib/client"
 export {
   type ContractTree,
   defineContract,
@@ -8,7 +8,9 @@ export {
   type Leaf,
   procedure,
   type ProcedureLeaf,
-} from "./contract"
-export { createMemoryTransport, createRouter, type Router } from "./router"
-export type { InferClient, InferHandlers, Transport } from "./types"
-export { flatten } from "./utils"
+} from "./lib/contract"
+export { createRouter, type Router } from "./lib/router"
+export { ValidationError } from "./lib/standard"
+export { createMemoryTransport, type Transport } from "./lib/transport"
+export type { InferClient, InferHandlers } from "./lib/types"
+export { flatten } from "./lib/utils"

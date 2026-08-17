@@ -1,13 +1,14 @@
 {
   "name": "@adelrodriguez/conduit",
   "version": "0.1.0",
-  "description": "Type-safe, Proxy-based RPC from a Zod schema tree — a transport-agnostic core for adapters like Electron IPC and QStash",
+  "description": "Type-safe, Proxy-based RPC from a Standard Schema contract tree — a transport-agnostic core for adapters like Electron IPC and QStash",
   "keywords": [
     "contract",
     "ipc",
     "proxy",
     "rpc",
     "schema",
+    "standard-schema",
     "type-safe",
     "typescript",
     "zod"
@@ -49,6 +50,9 @@
     "test:watch": "bun test --watch",
     "version": "changeset version && pnpm run format"
   },
+  "dependencies": {
+    "@standard-schema/spec": "^1.0.0"
+  },
   "devDependencies": {
     "@changesets/cli": "^3.0.0",
     "@types/bun": "^1.3.14",
@@ -58,9 +62,7 @@
     "oxlint": "^1.78.0",
     "oxlint-tsgolint": "^7.0.2001",
     "tsdown": "^0.22.14",
-    "typescript": "^7.0.2"
-  },
-  "peerDependencies": {
+    "typescript": "^7.0.2",
     "zod": "^4.4.3"
   },
   "packageManager": "pnpm@12.0.0-rc.6"

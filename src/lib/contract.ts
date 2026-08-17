@@ -1,12 +1,15 @@
-import type { $ZodType } from "zod/v4/core"
+import type { StandardSchemaV1 } from "@standard-schema/spec"
 
-export type ProcedureLeaf<Input extends $ZodType = $ZodType, Output extends $ZodType = $ZodType> = {
+export type ProcedureLeaf<
+  Input extends StandardSchemaV1 = StandardSchemaV1,
+  Output extends StandardSchemaV1 = StandardSchemaV1,
+> = {
   _kind: "procedure"
   input: Input
   output: Output
 }
 
-export type EventLeaf<Payload extends $ZodType = $ZodType> = {
+export type EventLeaf<Payload extends StandardSchemaV1 = StandardSchemaV1> = {
   _kind: "event"
   payload: Payload
 }
@@ -20,11 +23,14 @@ export type ContractTree = {
 /**
  * A request/response operation. The client validates `input` before sending, the router validates
  * it again before dispatching, and the handler's return value is validated against `output`.
+ * Schemas are anything implementing Standard Schema (Zod, Valibot, ArkType, ...).
  */
-export function procedure<Input extends $ZodType, Output extends $ZodType>(definition: {
-  input: Input
-  output: Output
-}): ProcedureLeaf<Input, Output> {
+export function procedure<Input extends StandardSchemaV1, Output extends StandardSchemaV1>(
+  definition: {
+    input: Input
+    output: Output
+  }
+): ProcedureLeaf<Input, Output> {
   return { _kind: "procedure", ...definition }
 }
 
@@ -32,7 +38,7 @@ export function procedure<Input extends $ZodType, Output extends $ZodType>(defin
  * A fire-and-forget message. The client validates `payload` before sending and the router validates
  * it again before dispatching.
  */
-export function event<Payload extends $ZodType>(payload: Payload): EventLeaf<Payload> {
+export function event<Payload extends StandardSchemaV1>(payload: Payload): EventLeaf<Payload> {
   return { _kind: "event", payload }
 }
 

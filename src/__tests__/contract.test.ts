@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import * as z from "zod"
-import { defineContract, event, procedure } from "../contract"
-import { flatten } from "../utils"
+import { defineContract, event, procedure } from "../lib/contract"
+import { flatten } from "../lib/utils"
 
 describe("defineContract", () => {
   test("returns the tree unchanged", () => {

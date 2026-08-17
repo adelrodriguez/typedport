@@ -1,5 +1,5 @@
-import { parse } from "zod/v4/core"
 import type { ContractTree } from "./contract"
+import { parseWith } from "./standard"
 import type { InferHandlers } from "./types"
 import { flatten } from "./utils"
 
@@ -13,7 +13,8 @@ export type Router = {
   /**
    * Validates and dispatches an incoming call. `path` and `raw` are untrusted: an unknown path
    * throws, input is parsed against the leaf's schema before the handler runs, and a procedure's
-   * result is parsed against the output schema so an off-contract handler fails loudly.
+   * result is parsed against the output schema so an off-contract handler fails loudly. Validation
+   * failures throw `ValidationError`; anything else escaping `dispatch` came from the handler.
    */
   dispatch: (path: string, raw: unknown) => Promise<unknown>
 }
@@ -23,7 +24,7 @@ export function createRouter<Tree extends ContractTree>(
   handlers: InferHandlers<Tree>
 ): Router {
   const leaves = flatten(contract)
-  const handlerMap = handlers as Record<string, (input: unknown) => Promise<unknown>>
+  const handlerMap = handlers as Record<string, (input: unknown) => unknown>
 
   return {
     channels: Object.keys(leaves),
@@ -36,26 +37,13 @@ export function createRouter<Tree extends ContractTree>(
       }
 
       if (leaf._kind === "event") {
-        await handler(parse(leaf.payload, raw))
+        await handler(await parseWith(leaf.payload, raw))
         return
       }
 
-      const result = await handler(parse(leaf.input, raw))
+      const result = await handler(await parseWith(leaf.input, raw))
 
-      return parse(leaf.output, result)
+      return await parseWith(leaf.output, result)
     },
   }
-}
-
-/**
- * A transport that dispatches directly to a router in the same process. Useful for tests and for
- * exercising a contract without real I/O.
- */
-export function createMemoryTransport(router: Router) {
-  return {
-    request: (path: string, input: unknown) => router.dispatch(path, input),
-    send: async (path: string, payload: unknown) => {
-      await router.dispatch(path, payload)
-    },
-  } satisfies { request: unknown; send: unknown }
 }

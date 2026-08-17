@@ -1,9 +1,10 @@
 /* oxlint-disable await-thenable, no-confusing-void-expression -- bun:test types async matchers like `.rejects.toThrow()` as void, but they must be awaited for the assertion to complete */
 import { describe, expect, test } from "bun:test"
 import * as z from "zod"
-import { createClient } from "../client"
-import { defineContract, event, procedure } from "../contract"
-import { createMemoryTransport, createRouter } from "../router"
+import { createClient } from "../lib/client"
+import { defineContract, event, procedure } from "../lib/contract"
+import { createRouter } from "../lib/router"
+import { createMemoryTransport } from "../lib/transport"
 
 const LocalTextFile = z.object({ contents: z.string(), path: z.string() })
 
@@ -100,7 +101,7 @@ describe("createClient", () => {
 
   test("rejects when the transport lacks the required function", async () => {
     const client = createClient(contract, {})
-    const events = createClient(contract, { request: () => Promise.resolve(null) })
+    const events = createClient(contract, { call: () => Promise.resolve(null) })
 
     await expect(client.localFiles.open()).rejects.toThrow("Transport does not support procedures")
     await expect(events.stripe.checkout.created.publish({ id: "evt_1" })).rejects.toThrow(
