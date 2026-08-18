@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest"
 import * as z from "zod"
 import { defineContract, event } from "../contract"
+import { TypeportError } from "../error"
 import { createRouter } from "../router"
 
 const contract = defineContract({
@@ -57,13 +58,18 @@ describe("createRouter", () => {
     )
   })
 
-  test("rejects resolver results that drift off contract", async () => {
+  test("rejects resolver results that drift off contract as output-validation", async () => {
     const router = createRouter(contract, {
       "math.add": () => "not a number" as unknown as number,
       notify: () => null,
     })
 
-    await expect(router.dispatch("math.add", { a: 1, b: 2 })).rejects.toThrow()
+    const error = await router.dispatch("math.add", { a: 1, b: 2 }).catch((error: unknown) => error)
+
+    // The server's fault, not the caller's — a distinct code lets edges avoid
+    // reporting it as a 400.
+    expect(error).toBeInstanceOf(TypeportError)
+    expect((error as TypeportError).code).toBe("output-validation")
   })
 
   test("passes the edge's context to every resolver", async () => {

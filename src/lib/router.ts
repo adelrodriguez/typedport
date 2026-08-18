@@ -15,8 +15,10 @@ export type Router<Context = void> = {
    * Validates and dispatches an incoming call. `path` and `raw` are untrusted: an unknown path
    * throws, input is parsed against the leaf's schema before the resolver runs, and when the leaf
    * declares an `output` the result is parsed against it so an off-contract resolver fails loudly
-   * (one-way results are discarded). Library failures throw `TypeportError` (`validation`,
-   * `unknown-channel`); anything else escaping `dispatch` came from the resolver.
+   * (one-way results are discarded). Library failures throw `TypeportError` — `validation` for the
+   * caller's input, `output-validation` for a resolver result that drifted off contract,
+   * `unknown-channel` for a path outside it; anything else escaping `dispatch` came from the
+   * resolver.
    *
    * `context` is whatever the edge knows about the caller (the authenticated user, the sender
    * identity) and reaches every resolver untouched. With the default `Context = void` the argument
@@ -56,7 +58,20 @@ export function createRouter<Tree extends ContractTree, Context = void>(
       return
     }
 
-    return await parseWith(leaf.output, result)
+    try {
+      return await parseWith(leaf.output, result)
+    } catch (error) {
+      // An off-contract resolver result is the server's fault, not the
+      // caller's — recode it so edges can tell the two apart.
+      if (error instanceof TypeportError && error.code === "validation") {
+        throw new TypeportError(
+          { code: "output-validation", issues: error.issues },
+          { cause: error }
+        )
+      }
+
+      throw error
+    }
   }
 
   return { channels: Object.keys(leaves), dispatch }

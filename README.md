@@ -134,7 +134,7 @@ Input is parsed twice by design. The client parses before sending so the caller 
 
 Results flow the other way with one parse: the router validates the resolver's return against `output` before it leaves the server, and the client returns the transport's value as-is. When the peer is a typeport router the result is schema-checked end to end; when it isn't (a plain HTTP endpoint, a mock), the client's return type is a promise, not a guarantee — validate at the edge if you don't trust the peer.
 
-Every failure the library raises is a `TypeportError`, discriminated by `code` — `validation` (with the Standard Schema `issues`), `unknown-channel` (with the `path`), and the `connect` lifecycle codes `timeout`, `closed`, and `no-router`. One `instanceof`, then `code` narrows the fields; anything that is _not_ a `TypeportError` came from application code:
+Every failure the library raises is a `TypeportError`, discriminated by `code` — `validation` (the caller's input failed, with the Standard Schema `issues`), `output-validation` (the resolver's result drifted off contract — the server's fault, not the caller's), `unknown-channel` (with the `path`), the `connect` lifecycle codes `timeout`, `closed`, and `no-router`, and `malformed-envelope` (`fromWire` got something that isn't an envelope). One `instanceof`, then `code` narrows the fields; anything that is _not_ a `TypeportError` came from application code:
 
 ```typescript
 import { TypeportError } from "typeport"
@@ -227,14 +227,17 @@ const handle = async (request: Request): Promise<Response> => {
   // back so z.void() leaves round-trip.
   const wire = await toWire(router.dispatch(path, (await request.json()) ?? undefined))
 
-  if (wire.ok || wire.error.detail) {
-    return Response.json(wire, {
-      status: wire.ok ? 200 : wire.error.detail?.code === "validation" ? 400 : 500,
-    })
+  if (wire.ok) {
+    return Response.json(wire, { status: 200 })
   }
 
-  // No detail means application code failed — its message belongs in the
-  // server's logs, not in a response to an untrusted caller.
+  // Only `validation` is the caller's fault. Everything else — an application
+  // error, an off-contract resolver result (`output-validation`) — belongs in
+  // the server's logs, not in a response to an untrusted caller.
+  if (wire.error.detail?.code === "validation") {
+    return Response.json(wire, { status: 400 })
+  }
+
   console.error(wire.error)
   return Response.json(
     { ok: false, error: { message: "Internal server error", name: "Error" } },

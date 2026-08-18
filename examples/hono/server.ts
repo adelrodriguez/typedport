@@ -60,13 +60,14 @@ const respond = async (c: Context, path: string, input: unknown) => {
     return c.json(wire, 200)
   }
 
-  if (wire.error.detail) {
-    return c.json(wire, wire.error.detail.code === "validation" ? 400 : 500)
+  // Only `validation` is the caller's fault, so only its issues go back out.
+  // Everything else — an application error, a resolver result that drifted off
+  // contract (`output-validation`) — is the server's problem: log the detail,
+  // redact the response.
+  if (wire.error.detail?.code === "validation") {
+    return c.json(wire, 400)
   }
 
-  // A failure without detail came from application code — a database error, a
-  // filesystem error. Its message is for the server's logs, not for an
-  // untrusted caller.
   console.error(`resolver failed for "${path}":`, wire.error)
   return fail(c, "Internal server error", 500)
 }

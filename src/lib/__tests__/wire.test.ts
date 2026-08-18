@@ -233,14 +233,25 @@ describe("toWire / fromWire", () => {
     expect((error as TypeportError).code).toBe("validation")
   })
 
-  test("rejects values that are not envelopes with a clear error", () => {
+  test("rejects values that are not envelopes with code malformed-envelope", () => {
     for (const garbage of [
       null,
       "502 Bad Gateway",
       { message: "not an envelope" },
       { ok: false },
     ]) {
-      expect(() => fromWire(garbage)).toThrow("not a WireResult envelope")
+      const error = (() => {
+        try {
+          fromWire(garbage)
+          return null
+        } catch (error) {
+          return error
+        }
+      })()
+
+      // Library-raised, so it follows the one rule: TypeportError with a code.
+      expect(error).toBeInstanceOf(TypeportError)
+      expect((error as TypeportError).code).toBe("malformed-envelope")
     }
   })
 

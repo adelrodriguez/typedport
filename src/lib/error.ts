@@ -7,7 +7,9 @@ import type { StandardSchemaV1 } from "@standard-schema/spec"
  */
 export type TypeportErrorDetail =
   | { code: "closed" }
+  | { code: "malformed-envelope" }
   | { code: "no-router" }
+  | { code: "output-validation"; issues: readonly StandardSchemaV1.Issue[] }
   | { code: "timeout"; path: string; timeoutMs: number }
   | { code: "unknown-channel"; path: string }
   | { code: "validation"; issues: readonly StandardSchemaV1.Issue[] }
@@ -16,14 +18,17 @@ function messageFor(detail: TypeportErrorDetail): string {
   switch (detail.code) {
     case "closed":
       return "Wire closed"
+    case "malformed-envelope":
+      return "Received a value that is not a WireResult envelope"
     case "no-router":
       return "This end does not serve requests"
+    case "output-validation":
+    case "validation":
+      return detail.issues.map((issue) => issue.message).join("; ")
     case "timeout":
       return `Call to "${detail.path}" timed out after ${detail.timeoutMs}ms`
     case "unknown-channel":
       return `Unknown channel: "${detail.path}"`
-    case "validation":
-      return detail.issues.map((issue) => issue.message).join("; ")
   }
 }
 
@@ -40,11 +45,15 @@ class TypeportBaseError extends Error {
  * The single error class for every failure the library raises — `code` discriminates, and each code
  * carries its own typed fields:
  *
- * - `validation` (`issues`) — a schema rejected a value, on either side of the boundary
+ * - `validation` (`issues`) — a schema rejected the caller's input; the caller's fault
+ * - `output-validation` (`issues`) — the resolver's result failed the leaf's `output` schema; the
+ *   server's fault, so edges should not blame (or inform) the caller
  * - `unknown-channel` (`path`) — the path is not in the contract
  * - `timeout` (`path`, `timeoutMs`) — a `connect` call the peer never answered
  * - `closed` — the wire was torn down; the close reason is in `cause`
  * - `no-router` — the peer's `connect` has no router to serve requests
+ * - `malformed-envelope` — `fromWire` received a value that is not a `WireResult` (a gateway error
+ *   page, a proxy 502)
  *
  * `instanceof TypeportError` then `error.code === "..."` narrows the fields. Anything a resolver
  * throws is not wrapped: an error that is not a `TypeportError` came from application code.
@@ -66,8 +75,12 @@ export function detailOf(error: TypeportError): TypeportErrorDetail {
   switch (error.code) {
     case "closed":
       return { code: "closed" }
+    case "malformed-envelope":
+      return { code: "malformed-envelope" }
     case "no-router":
       return { code: "no-router" }
+    case "output-validation":
+      return { code: "output-validation", issues: error.issues }
     case "timeout":
       return { code: "timeout", path: error.path, timeoutMs: error.timeoutMs }
     case "unknown-channel":

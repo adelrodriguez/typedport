@@ -39,7 +39,9 @@ export async function toWire(operation: Promise<unknown> | (() => unknown)): Pro
  */
 export function fromWire(data: unknown): unknown {
   if (!isEnvelope(data)) {
-    throw new Error("fromWire received a value that is not a WireResult envelope")
+    // A library-raised failure, so it follows the one rule: it is a
+    // TypeportError, and adapters can branch on its code.
+    throw new TypeportError({ code: "malformed-envelope" })
   }
 
   if (data.ok) {
