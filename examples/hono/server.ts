@@ -1,12 +1,12 @@
 /* oxlint-disable no-console -- runnable example */
 // One Hono route serves the entire contract. No per-route validators: the
 // router parses input before any resolver runs and parses results on the way
-// back. dispatchToWire never throws, so every outcome maps to a status code.
+// back. toWire never throws, so every outcome maps to a status code.
 import { serve } from "@hono/node-server"
 import { Hono } from "hono"
 import type * as z from "zod"
 import { createRouter } from "../../src/index.ts"
-import { dispatchToWire } from "../../src/wire.ts"
+import { toWire } from "../../src/wire.ts"
 import { contract, type Todo } from "./contract.ts"
 
 const todos = new Map<string, z.infer<typeof Todo>>()
@@ -49,7 +49,7 @@ app.post("/rpc/:path", async (c) => {
   // JSON has no undefined, so the client sends null for void inputs; map it
   // back so z.void() leaves round-trip.
   const body = (await c.req.json()) as unknown
-  const wire = await dispatchToWire(router, path, body ?? undefined)
+  const wire = await toWire(router.dispatch(path, body ?? undefined))
 
   if (wire.ok) {
     return c.json(wire, 200)

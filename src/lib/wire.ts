@@ -17,24 +17,22 @@ export type WireResult =
     }
 
 /**
- * Server edge: dispatch that never throws — every outcome, including resolver crashes, comes back
- * as a serializable `WireResult`.
+ * Captures any operation's outcome as a serializable `WireResult` — never throws. Pass the
+ * operation's promise (`toWire(router.dispatch(path, payload))`), or a thunk when the operation
+ * can throw synchronously. `fromWire` on the other side is its inverse:
+ * `fromWire(await toWire(x))` returns what `x` resolved with, or rethrows what it threw.
  */
-export async function dispatchToWire(
-  router: Router,
-  path: string,
-  payload: unknown
-): Promise<WireResult> {
+export async function toWire(operation: Promise<unknown> | (() => unknown)): Promise<WireResult> {
   try {
-    return { ok: true, result: await router.dispatch(path, payload) }
+    return { ok: true, result: await (typeof operation === "function" ? operation() : operation) }
   } catch (error) {
     return { error: serializeError(error), ok: false }
   }
 }
 
 /**
- * Client edge: unwrap a `WireResult` — returns the result, or rethrows the failure with
- * `ValidationError` rehydrated (issues intact) so `instanceof` checks work across the boundary.
+ * Unwraps a `WireResult`: returns the result, or rethrows the failure — with `ValidationError`
+ * rehydrated (issues intact) so `instanceof` checks work across the boundary.
  */
 export function fromWire(data: WireResult): unknown {
   if (data.ok) {
@@ -179,7 +177,7 @@ export function connect(
 
   async function respond(message: { id: number; path: string; payload: unknown }): Promise<void> {
     const result: WireResult = router
-      ? await dispatchToWire(router, message.path, message.payload)
+      ? await toWire(router.dispatch(message.path, message.payload))
       : { error: { message: "This end does not serve requests", name: "Error" }, ok: false }
 
     if (!closed) {

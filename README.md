@@ -118,19 +118,21 @@ Authenticity is the transport's job, not the core's: an HTTP adapter verifies si
 
 Two problems every real boundary hits, solved once in an optional subpath export:
 
-**Errors don't survive serialization.** A thrown `ValidationError` gets flattened by `invoke`, structured clone, or JSON. `dispatchToWire`/`fromWire` are the envelope: the server edge flattens every outcome into a serializable value, the client edge unwraps it — rehydrating `ValidationError` with its issues so `instanceof` works across the boundary:
+**Errors don't survive serialization.** A thrown `ValidationError` gets flattened by `invoke`, structured clone, or JSON. `toWire`/`fromWire` are the codec: `toWire` captures any operation's outcome as a serializable value, `fromWire` unwraps it on the other side — returning the result or rethrowing, with `ValidationError` rehydrated (issues intact) so `instanceof` works across the boundary:
 
 ```typescript
-import { dispatchToWire, fromWire } from "typeport/wire"
+import { fromWire, toWire } from "typeport/wire"
 
-// server edge — never throws, always returns a serializable WireResult
-ipcMain.handle(channel, (_event, payload) => dispatchToWire(router, channel, payload))
+// server edge — never throws, always resolves a serializable WireResult
+ipcMain.handle(channel, (_event, payload) => toWire(router.dispatch(channel, payload)))
 
 // client edge — unwraps the result or rethrows, ValidationError intact
 const api = createClient(contract, async (path, payload) =>
   fromWire(await window.typeport.send(path, payload))
 )
 ```
+
+`toWire` takes the operation's promise — dispatch, a queue publish, anything — or a thunk when the operation can throw synchronously. `fromWire(await toWire(x))` returns what `x` resolved with, or rethrows what it threw.
 
 **Message pipes have no request/response.** `postMessage`-shaped channels (MessagePorts, workers, WebSockets) need correlation ids, a pending map, timeouts, and teardown. `connect` owns all of that, over a minimal `Wire` — anything that can send a value and hand incoming values to a listener:
 
@@ -174,7 +176,7 @@ export const api = createClient(contract, async (path, payload) => (await ready)
 The server edge is a fetch handler (Hono, Next.js route handlers, Bun, and Deno all accept one). The wire envelope carries every outcome, so a `ValidationError` thrown by the router arrives in the browser as a real `ValidationError`:
 
 ```typescript
-import { dispatchToWire } from "typeport/wire"
+import { toWire } from "typeport/wire"
 
 const handle = async (request: Request): Promise<Response> => {
   const path = new URL(request.url).pathname.split("/").at(-1) ?? ""
@@ -185,7 +187,7 @@ const handle = async (request: Request): Promise<Response> => {
 
   // JSON has no undefined, so the client sends null for void inputs; map it
   // back so z.void() leaves round-trip.
-  const wire = await dispatchToWire(router, path, (await request.json()) ?? undefined)
+  const wire = await toWire(router.dispatch(path, (await request.json()) ?? undefined))
 
   return Response.json(wire, {
     status: wire.ok ? 200 : wire.error.issues ? 400 : 500,
@@ -251,7 +253,7 @@ import { contract } from "./contract"
 export const api = createClient(contract, (path, payload) => window.typeport.send(path, payload))
 ```
 
-One-way leaves ride `invoke` too — the extra empty response is harmless and keeps the edge to a single function. Note that `ipcRenderer.invoke` re-throws only the error message string, so a `ValidationError` from the main process arrives in the renderer as a flat `Error`. If you need structured errors, wrap both edges in the `typeport/wire` envelope: `dispatchToWire(router, channel, payload)` in the `handle` callback, `fromWire(await ...)` in the transport. If you load remote content, also check `event.senderFrame` before dispatching.
+One-way leaves ride `invoke` too — the extra empty response is harmless and keeps the edge to a single function. Note that `ipcRenderer.invoke` re-throws only the error message string, so a `ValidationError` from the main process arrives in the renderer as a flat `Error`. If you need structured errors, wrap both edges in the `typeport/wire` envelope: `toWire(router.dispatch(channel, payload))` in the `handle` callback, `fromWire(await ...)` in the transport. If you load remote content, also check `event.senderFrame` before dispatching.
 
 </details>
 

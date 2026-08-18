@@ -4,7 +4,7 @@ import { createClient } from "../lib/client"
 import { defineContract, event } from "../lib/contract"
 import { createRouter } from "../lib/router"
 import { ValidationError } from "../lib/standard"
-import { connect, dispatchToWire, fromWire, type Wire } from "../lib/wire"
+import { connect, fromWire, toWire, type Wire } from "../lib/wire"
 
 // An in-memory duplex pipe. Cloning every message (as postMessage would)
 // asserts the protocol survives serializing boundaries, not shared references.
@@ -137,20 +137,20 @@ describe("connect", () => {
   })
 })
 
-describe("dispatchToWire / fromWire", () => {
+describe("toWire / fromWire", () => {
   const router = createRouter(pullContract, {
     "math.add": ({ a, b }) => a + b,
   })
 
   test("flattens success into a value fromWire unwraps", async () => {
-    const wire = await dispatchToWire(router, "math.add", { a: 2, b: 3 })
+    const wire = await toWire(router.dispatch("math.add", { a: 2, b: 3 }))
 
     expect(wire).toEqual({ ok: true, result: 5 })
     expect(fromWire(wire)).toBe(5)
   })
 
   test("flattens validation failures into issues fromWire rehydrates", async () => {
-    const wire = await dispatchToWire(router, "math.add", { a: 2, b: "three" })
+    const wire = await toWire(router.dispatch("math.add", { a: 2, b: "three" }))
 
     expect(wire.ok).toBe(false)
 
@@ -164,5 +164,21 @@ describe("dispatchToWire / fromWire", () => {
     })()
 
     expect(error).toBeInstanceOf(ValidationError)
+  })
+
+  test("captures operations that are not dispatch, including sync throws", async () => {
+    await expect(toWire(Promise.resolve("receipt"))).resolves.toEqual({
+      ok: true,
+      result: "receipt",
+    })
+
+    const wire = await toWire(() => {
+      throw new Error("sync explosion")
+    })
+
+    expect(wire).toEqual({
+      error: { message: "sync explosion", name: "Error" },
+      ok: false,
+    })
   })
 })
