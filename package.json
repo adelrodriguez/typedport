@@ -13,15 +13,15 @@
     "typescript",
     "zod"
   ],
-  "homepage": "https://github.com/adelrodriguez/conduit#readme",
+  "homepage": "https://github.com/adelrodriguez/typeport#readme",
   "bugs": {
-    "url": "https://github.com/adelrodriguez/conduit/issues"
+    "url": "https://github.com/adelrodriguez/typeport/issues"
   },
   "license": "MIT",
   "author": "Adel Rodriguez",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/adelrodriguez/conduit.git"
+    "url": "git+https://github.com/adelrodriguez/typeport.git"
   },
   "files": [
     "dist"
