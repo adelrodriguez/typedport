@@ -158,17 +158,42 @@ describe("connect", () => {
     expect(seen).toEqual(["s1"])
   })
 
-  test("close rejects pending and future calls", async () => {
+  test("close rejects pending and future calls with the reason in cause", async () => {
     const [wire] = createWirePair() // peer end never connected
     const { close, transport } = connect(wire)
 
     const pending = transport("math.add", { a: 1, b: 2 })
     close(new Error("window closed"))
 
-    await expect(pending).rejects.toThrow("window closed")
-    await expect(Promise.resolve(transport("math.add", { a: 1, b: 2 }))).rejects.toThrow(
-      "window closed"
+    const error = await Promise.resolve(pending).catch((error: unknown) => error)
+    const late = await Promise.resolve(transport("math.add", { a: 1, b: 2 })).catch(
+      (error: unknown) => error
     )
+
+    for (const rejection of [error, late]) {
+      expect(rejection).toBeInstanceOf(TypeportError)
+      expect((rejection as TypeportError).code).toBe("closed")
+      expect(((rejection as TypeportError).cause as Error).message).toBe("window closed")
+    }
+  })
+
+  test("survives a synchronously-throwing send without leaking pending entries", async () => {
+    const [silent] = createWirePair()
+    const wire: Wire = {
+      onMessage: silent.onMessage,
+      send: () => {
+        throw new Error("DataCloneError: not cloneable")
+      },
+    }
+    const { close, transport } = connect(wire)
+
+    await expect(Promise.resolve(transport("math.add", { a: 1, b: 2 }))).rejects.toThrow(
+      "not cloneable"
+    )
+
+    // close() rejects whatever is still pending — if the failed send leaked its
+    // entry, this would double-settle and vitest would report it.
+    close()
   })
 })
 

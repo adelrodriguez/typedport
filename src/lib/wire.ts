@@ -77,8 +77,9 @@ type PendingEntry = {
  * session, the window) is passed to every dispatch this end serves.
  *
  * `timeoutMs` bounds each outgoing call; without it a dead peer leaves calls pending forever.
- * `close` rejects everything in flight, rejects future calls, and stops serving — wire it to
- * whatever liveness signal the pipe has (a window's `closed`, a socket's `close`).
+ * `close(reason?)` rejects everything in flight and every future call with a `TypeportError` (code
+ * `closed`, the reason in `cause`) and stops serving — wire it to whatever liveness signal the pipe
+ * has (a window's `closed`, a socket's `close`).
  */
 export function connect<Context = void>(
   wire: Wire,
@@ -129,7 +130,7 @@ export function connect<Context = void>(
         return
       }
 
-      closed = reason ?? new TypeportError({ code: "closed" })
+      closed = new TypeportError({ code: "closed" }, { cause: reason })
 
       if (typeof unsubscribe === "function") {
         unsubscribe()
@@ -176,7 +177,19 @@ export function connect<Context = void>(
           timer,
         })
 
-        wire.send({ id, kind: "req", path, payload })
+        try {
+          wire.send({ id, kind: "req", path, payload })
+        } catch (error) {
+          // A synchronously-throwing send (DataCloneError on a non-cloneable
+          // payload) rejects the caller; don't leak the pending entry.
+          pending.delete(id)
+
+          if (timer !== undefined) {
+            clearTimeout(timer)
+          }
+
+          throw error
+        }
       }),
   }
 
@@ -186,7 +199,13 @@ export function connect<Context = void>(
       : { error: serializeError(new TypeportError({ code: "no-router" })), ok: false }
 
     if (!closed) {
-      wire.send({ id: message.id, kind: "res", result })
+      try {
+        wire.send({ id: message.id, kind: "res", result })
+      } catch {
+        // The pipe died between request and reply; `respond` runs unawaited, so
+        // swallowing here is what keeps this from becoming an unhandled
+        // rejection. The peer's own timeout covers the lost reply.
+      }
     }
   }
 }

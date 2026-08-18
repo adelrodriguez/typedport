@@ -46,6 +46,8 @@ setInterval(() => {
   count += 1
 
   for (const push of clients) {
-    void push.ticker.tick({ count })
+    // The peer may hang up between the tick and its acknowledgement — an
+    // unhandled rejection here would take the whole server down.
+    push.ticker.tick({ count }).catch(() => null)
   }
 }, 1000)

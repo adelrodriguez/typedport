@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest"
 import * as z from "zod"
-import { defineContract, event } from "../contract"
+import { defineContract, event, type OneWayContract } from "../contract"
 import { flatten } from "../utils"
 
 describe("event", () => {
@@ -19,6 +19,21 @@ describe("event", () => {
 
     expect(leaf.input).toBe(input)
     expect(leaf.output).toBe(output)
+  })
+})
+
+const acceptsOneWay = (tree: OneWayContract) => tree
+
+describe("OneWayContract", () => {
+  test("accepts one-way trees and rejects round-trip leaves at compile time", () => {
+    const oneWay = defineContract({
+      stripe: { checkout: { created: event(z.object({ id: z.string() })) } },
+    })
+
+    expect(acceptsOneWay(oneWay)).toBe(oneWay)
+
+    // @ts-expect-error a leaf with an `output` schema is a round trip, not one-way
+    acceptsOneWay(defineContract({ ask: event({ input: z.string(), output: z.string() }) }))
   })
 })
 

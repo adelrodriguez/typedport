@@ -132,6 +132,8 @@ Per-call options shallow-merge over bound ones. When the transport declares no o
 
 Input is parsed twice by design. The client parses before sending so the caller gets an error with a stack trace at the call site. The router parses again before dispatching because the sender may not be your client at all — in transports like Electron IPC the receiving process must treat every message as untrusted. Only the router's parse is a security boundary.
 
+Results flow the other way with one parse: the router validates the resolver's return against `output` before it leaves the server, and the client returns the transport's value as-is. When the peer is a typeport router the result is schema-checked end to end; when it isn't (a plain HTTP endpoint, a mock), the client's return type is a promise, not a guarantee — validate at the edge if you don't trust the peer.
+
 Every failure the library raises is a `TypeportError`, discriminated by `code` — `validation` (with the Standard Schema `issues`), `unknown-channel` (with the `path`), and the `connect` lifecycle codes `timeout`, `closed`, and `no-router`. One `instanceof`, then `code` narrows the fields; anything that is _not_ a `TypeportError` came from application code:
 
 ```typescript
@@ -191,7 +193,7 @@ A transport is one function, so the edges are almost embarrassing:
 const memory = router.dispatch
 const electron = (path, input) => ipcRenderer.invoke(path, input)
 const qstash = async (path, body) => qstashClient.publishJSON({ url: `${baseUrl}/${path}`, body })
-const port = createPortTransport(port) // request/response over postMessage, below
+const port = connect(wrapDomPort(messagePort)).transport // request/response over postMessage, below
 ```
 
 One thing to keep straight: a one-way transport (a queue) paired with a leaf that declares an `output` is a contract error the core cannot catch at runtime — the client would resolve the publish receipt as if it were the result. Keep `output` off the leaves a one-way transport serves, and make the compiler enforce it: adapters built on one-way delivery should constrain their contract parameter to `OneWayContract`, which rejects any tree containing a round-trip leaf.
