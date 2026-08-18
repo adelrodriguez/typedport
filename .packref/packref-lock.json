@@ -1,0 +1,16 @@
+{
+  "packages": [
+    {
+      "name": "@changesets/cli",
+      "registry": "npm",
+      "source": {
+        "directory": "packages/cli",
+        "host": "github.com",
+        "type": "repository",
+        "url": "https://github.com/changesets/changesets"
+      },
+      "tracking": "dependency",
+      "version": "3.0.0"
+    }
+  ]
+}

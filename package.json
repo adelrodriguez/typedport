@@ -51,7 +51,7 @@
     "dev": "tsdown --watch",
     "fix": "adamantite fix",
     "format": "adamantite format",
-    "release": "changeset publish",
+    "release": "pnpm run build && changeset publish",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
