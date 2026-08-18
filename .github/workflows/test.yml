@@ -1,0 +1,84 @@
+name: test
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_run:
+    workflows: ["adamantite"]
+    branches: [main]
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run tests
+        run: pnpm run test
+
+  examples:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run worker-threads example
+        run: pnpm tsx examples/worker-threads/main.ts
+
+      - name: Run Hono example
+        run: |
+          pnpm tsx examples/hono/server.ts &
+          sleep 2
+          pnpm tsx examples/hono/client.ts
+          kill %1
+
+      - name: Run WebSocket example
+        run: |
+          pnpm tsx examples/websocket/server.ts &
+          sleep 2
+          pnpm tsx examples/websocket/client.ts
+          kill %1
