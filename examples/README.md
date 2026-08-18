@@ -14,6 +14,17 @@ alternative. A browser Web Worker has the same shape; only the port globals diff
 pnpm tsx examples/worker-threads/main.ts
 ```
 
+## Hono (HTTP)
+
+The HTTP recipe made concrete: one Hono route serves the whole contract through the wire envelope
+(400 for validation failures, 500 for resolver crashes), and the client is a `fetch` transport.
+Run in two terminals:
+
+```bash
+pnpm tsx examples/hono/server.ts
+pnpm tsx examples/hono/client.ts
+```
+
 ## WebSocket
 
 A bidirectional stack over one socket: the client calls the server (`math.add`), the server pushes

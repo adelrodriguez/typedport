@@ -183,7 +183,9 @@ const handle = async (request: Request): Promise<Response> => {
     return new Response("Unknown channel", { status: 404 })
   }
 
-  const wire = await dispatchToWire(router, path, await request.json())
+  // JSON has no undefined, so the client sends null for void inputs; map it
+  // back so z.void() leaves round-trip.
+  const wire = await dispatchToWire(router, path, (await request.json()) ?? undefined)
 
   return Response.json(wire, {
     status: wire.ok ? 200 : wire.error.issues ? 400 : 500,
