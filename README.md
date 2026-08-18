@@ -97,18 +97,18 @@ const client = createClient(contract, router.dispatch)
 
 Input is parsed twice by design. The client parses before sending so the caller gets an error with a stack trace at the call site. The router parses again before dispatching because the sender may not be your client at all — in transports like Electron IPC the receiving process must treat every message as untrusted. Only the router's parse is a security boundary.
 
-Validation failures throw `ValidationError`, which carries the Standard Schema issues. Adapters use this to tell bad input (reject the message, keep serving) apart from resolver failures (let them propagate):
+Every failure the library raises is a `TypeportError`, discriminated by `code` — `validation` (with the Standard Schema `issues`), `unknown-channel` (with the `path`), and the `connect` lifecycle codes `timeout`, `closed`, and `no-router`. One `instanceof`, then `code` narrows the fields; anything that is *not* a `TypeportError` came from application code:
 
 ```typescript
-import { ValidationError } from "typeport"
+import { TypeportError } from "typeport"
 
 try {
   await router.dispatch(path, raw)
 } catch (error) {
-  if (error instanceof ValidationError) {
+  if (error instanceof TypeportError && error.code === "validation") {
     return badRequest(error.issues)
   }
-  throw error
+  throw error // unknown channel, or the resolver itself failed
 }
 ```
 
@@ -118,7 +118,7 @@ Authenticity is the transport's job, not the core's: an HTTP adapter verifies si
 
 Two problems every real boundary hits, solved once in an optional subpath export:
 
-**Errors don't survive serialization.** A thrown `ValidationError` gets flattened by `invoke`, structured clone, or JSON. `toWire`/`fromWire` are the codec: `toWire` captures any operation's outcome as a serializable value, `fromWire` unwraps it on the other side — returning the result or rethrowing, with `ValidationError` rehydrated (issues intact) so `instanceof` works across the boundary:
+**Errors don't survive serialization.** A thrown `TypeportError` gets flattened by `invoke`, structured clone, or JSON. `toWire`/`fromWire` are the codec: `toWire` captures any operation's outcome as a serializable value, `fromWire` unwraps it on the other side — returning the result or rethrowing, with `TypeportError` rehydrated (code and fields intact) so `instanceof` and `code` checks work across the boundary:
 
 ```typescript
 import { fromWire, toWire } from "typeport/wire"
@@ -126,7 +126,7 @@ import { fromWire, toWire } from "typeport/wire"
 // server edge — never throws, always resolves a serializable WireResult
 ipcMain.handle(channel, (_event, payload) => toWire(router.dispatch(channel, payload)))
 
-// client edge — unwraps the result or rethrows, ValidationError intact
+// client edge — unwraps the result or rethrows, TypeportError intact
 const api = createClient(contract, async (path, payload) =>
   fromWire(await window.typeport.send(path, payload))
 )
@@ -173,7 +173,7 @@ export const api = createClient(contract, async (path, payload) => (await ready)
 <details>
 <summary><strong>HTTP / fetch</strong> — any framework that speaks Request/Response</summary>
 
-The server edge is a fetch handler (Hono, Next.js route handlers, Bun, and Deno all accept one). The wire envelope carries every outcome, so a `ValidationError` thrown by the router arrives in the browser as a real `ValidationError`:
+The server edge is a fetch handler (Hono, Next.js route handlers, Bun, and Deno all accept one). The wire envelope carries every outcome, so a `TypeportError` thrown by the router arrives in the browser with its `code` and fields intact:
 
 ```typescript
 import { toWire } from "typeport/wire"
@@ -190,7 +190,7 @@ const handle = async (request: Request): Promise<Response> => {
   const wire = await toWire(router.dispatch(path, (await request.json()) ?? undefined))
 
   return Response.json(wire, {
-    status: wire.ok ? 200 : wire.error.issues ? 400 : 500,
+    status: wire.ok ? 200 : wire.error.detail?.code === "validation" ? 400 : 500,
   })
 }
 ```
@@ -253,7 +253,7 @@ import { contract } from "./contract"
 export const api = createClient(contract, (path, payload) => window.typeport.send(path, payload))
 ```
 
-One-way leaves ride `invoke` too — the extra empty response is harmless and keeps the edge to a single function. Note that `ipcRenderer.invoke` re-throws only the error message string, so a `ValidationError` from the main process arrives in the renderer as a flat `Error`. If you need structured errors, wrap both edges in the `typeport/wire` envelope: `toWire(router.dispatch(channel, payload))` in the `handle` callback, `fromWire(await ...)` in the transport. If you load remote content, also check `event.senderFrame` before dispatching.
+One-way leaves ride `invoke` too — the extra empty response is harmless and keeps the edge to a single function. Note that `ipcRenderer.invoke` re-throws only the error message string, so a `TypeportError` from the main process arrives in the renderer as a flat `Error`. If you need structured errors, wrap both edges in the `typeport/wire` envelope: `toWire(router.dispatch(channel, payload))` in the `handle` callback, `fromWire(await ...)` in the transport. If you load remote content, also check `event.senderFrame` before dispatching.
 
 </details>
 
@@ -341,7 +341,7 @@ const ready = new Promise<Transport>((resolve) => {
 export const api = createClient(contract, async (path, payload) => (await ready)(path, payload))
 ```
 
-Port messages buffer until the receiving end calls `start()`, and the deferred transport buffers calls until the port lands — no ready-handshake needed. A `ValidationError` thrown by either router arrives on the other side as a real `ValidationError` with its issues. The same wrappers work for Web Workers, iframes, and utility processes; only the port hand-off differs.
+Port messages buffer until the receiving end calls `start()`, and the deferred transport buffers calls until the port lands — no ready-handshake needed. A `TypeportError` thrown by either router arrives on the other side as a real `TypeportError` with its code and fields. The same wrappers work for Web Workers, iframes, and utility processes; only the port hand-off differs.
 
 </details>
 
@@ -352,7 +352,7 @@ See [`qstash-events`](https://github.com/adelrodriguez/qstash-events) for the fu
 
 ```typescript
 import { Client, Receiver } from "@upstash/qstash"
-import { createClient, createRouter, ValidationError } from "typeport"
+import { createClient, createRouter, TypeportError } from "typeport"
 
 const qstash = new Client({ token })
 
@@ -378,7 +378,7 @@ const handle = async (request: Request): Promise<Response> => {
     await router.dispatch(path, JSON.parse(body))
     return Response.json({ message: "Message processed successfully" })
   } catch (error) {
-    if (error instanceof ValidationError) {
+    if (error instanceof TypeportError && error.code === "validation") {
       return new Response("Invalid message structure", { status: 400 })
     }
     throw error

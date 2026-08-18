@@ -35,7 +35,7 @@ const api = createClient(contract, async (path, payload) => (await ready)(path, 
 console.log("2 + 3 =", await api.math.add({ a: 2, b: 3 }))
 
 // The server's router rejects bad input; the error arrives here as a real
-// ValidationError thanks to the wire envelope.
+// TypeportError (code "validation") thanks to the wire envelope.
 await api.math.add({ a: 2, b: "three" as unknown as number }).catch((error: unknown) => {
   console.log("server rejected:", (error as Error).message)
 })

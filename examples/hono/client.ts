@@ -1,7 +1,7 @@
 /* oxlint-disable no-console -- runnable example */
 // The client side of the HTTP recipe: a fetch transport wrapped in fromWire.
 // In a browser this file is identical — fetch and the contract are the same.
-import { createClient, ValidationError } from "../../src/index.ts"
+import { createClient, TypeportError } from "../../src/index.ts"
 import { fromWire, type WireResult } from "../../src/wire.ts"
 import { contract } from "./contract.ts"
 
@@ -29,7 +29,7 @@ await api.telemetry.pageView({ route: "/home" }) // one-way
 
 // The client validates before sending — this never reaches the network:
 await api.todos.create({ title: "" }).catch((error: unknown) => {
-  if (error instanceof ValidationError) {
+  if (error instanceof TypeportError && error.code === "validation") {
     console.log("rejected at the call site:", error.issues[0]?.message)
   }
 })

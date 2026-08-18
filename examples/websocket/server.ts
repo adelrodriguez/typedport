@@ -1,7 +1,7 @@
 /* oxlint-disable no-console -- runnable example */
 // One connect() per socket: each session serves the pull contract and gets a
 // typed push client for the peer. Messages are JSON — the wire envelope keeps
-// ValidationError intact across it.
+// TypeportError intact across it.
 import { WebSocketServer } from "ws"
 import { createClient, createRouter, type InferClient } from "../../src/index.ts"
 import { connect, type Wire } from "../../src/wire.ts"

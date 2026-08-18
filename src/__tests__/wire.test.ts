@@ -2,8 +2,8 @@ import { describe, expect, test } from "vitest"
 import * as z from "zod"
 import { createClient } from "../lib/client"
 import { defineContract, event } from "../lib/contract"
+import { TypeportError } from "../lib/error"
 import { createRouter } from "../lib/router"
-import { ValidationError } from "../lib/standard"
 import { connect, fromWire, toWire, type Wire } from "../lib/wire"
 
 // An in-memory duplex pipe. Cloning every message (as postMessage would)
@@ -73,16 +73,20 @@ describe("connect", () => {
     await expect(push.notify({ message: "hi" })).resolves.toBeUndefined()
   })
 
-  test("rehydrates ValidationError with issues across the wire", async () => {
+  test("rehydrates validation failures with issues across the wire", async () => {
     const { api } = createConnectedPeers()
 
     const error = await api.math
       .add({ a: 2, b: "three" as unknown as number })
       .catch((error: unknown) => error)
 
-    // Thrown by the remote router, yet instanceof works on this side.
-    expect(error).toBeInstanceOf(ValidationError)
-    expect((error as ValidationError).issues.length).toBeGreaterThan(0)
+    // Thrown by the remote router, yet instanceof and code checks work on this side.
+    expect(error).toBeInstanceOf(TypeportError)
+
+    const typeportError = error as Extract<TypeportError, { code: "validation" }>
+
+    expect(typeportError.code).toBe("validation")
+    expect(typeportError.issues.length).toBeGreaterThan(0)
   })
 
   test("carries resolver crashes as plain errors", async () => {
@@ -100,27 +104,40 @@ describe("connect", () => {
     )
 
     expect(error).toBeInstanceOf(Error)
-    expect(error).not.toBeInstanceOf(ValidationError)
+    expect(error).not.toBeInstanceOf(TypeportError)
     expect((error as Error).message).toBe("resolver exploded")
   })
 
-  test("a call-only end rejects incoming requests", async () => {
+  test("a call-only end rejects incoming requests with code no-router", async () => {
     const [serverWire, clientWire] = createWirePair()
     connect(serverWire) // no router
     const { transport } = connect(clientWire)
 
-    await expect(transport("math.add", { a: 1, b: 2 })).rejects.toThrow(
-      "This end does not serve requests"
+    const error = await Promise.resolve(transport("math.add", { a: 1, b: 2 })).catch(
+      (error: unknown) => error
     )
+
+    // Raised on the peer, rehydrated here with its code intact.
+    expect(error).toBeInstanceOf(TypeportError)
+    expect((error as TypeportError).code).toBe("no-router")
+    expect((error as TypeportError).message).toBe("This end does not serve requests")
   })
 
   test("times out calls the peer never answers", async () => {
     const [wire] = createWirePair() // peer end never connected
     const { transport } = connect(wire, { timeoutMs: 20 })
 
-    await expect(transport("math.add", { a: 1, b: 2 })).rejects.toThrow(
-      'Call to "math.add" timed out after 20ms'
+    const error = await Promise.resolve(transport("math.add", { a: 1, b: 2 })).catch(
+      (error: unknown) => error
     )
+
+    expect(error).toBeInstanceOf(TypeportError)
+
+    const typeportError = error as Extract<TypeportError, { code: "timeout" }>
+
+    expect(typeportError.code).toBe("timeout")
+    expect(typeportError.path).toBe("math.add")
+    expect(typeportError.timeoutMs).toBe(20)
   })
 
   test("close rejects pending and future calls", async () => {
@@ -163,7 +180,8 @@ describe("toWire / fromWire", () => {
       }
     })()
 
-    expect(error).toBeInstanceOf(ValidationError)
+    expect(error).toBeInstanceOf(TypeportError)
+    expect((error as TypeportError).code).toBe("validation")
   })
 
   test("captures operations that are not dispatch, including sync throws", async () => {

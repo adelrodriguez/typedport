@@ -1,19 +1,18 @@
-import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { Router } from "./router"
 import type { Transport } from "./types"
-import { ValidationError } from "./standard"
+import { detailOf, TypeportError, type TypeportErrorDetail } from "./error"
 
 /**
- * A dispatch outcome flattened to a serializable value, so errors survive boundaries that
- * structured-clone or JSON-encode (Electron `invoke`, `postMessage`, HTTP). `issues` is present
- * exactly when the failure was a `ValidationError`, letting `fromWire` rehydrate it on the other
- * side.
+ * An outcome flattened to a serializable value, so errors survive boundaries that structured-clone
+ * or JSON-encode (Electron `invoke`, `postMessage`, HTTP). `detail` is present exactly when the
+ * failure was a `TypeportError`, letting `fromWire` rehydrate it — code and fields intact — on the
+ * other side.
  */
 export type WireResult =
   | { ok: true; result: unknown }
   | {
       ok: false
-      error: { name: string; message: string; issues?: readonly StandardSchemaV1.Issue[] }
+      error: { detail?: TypeportErrorDetail; message: string; name: string }
     }
 
 /**
@@ -31,16 +30,16 @@ export async function toWire(operation: Promise<unknown> | (() => unknown)): Pro
 }
 
 /**
- * Unwraps a `WireResult`: returns the result, or rethrows the failure — with `ValidationError`
- * rehydrated (issues intact) so `instanceof` checks work across the boundary.
+ * Unwraps a `WireResult`: returns the result, or rethrows the failure — with `TypeportError`
+ * rehydrated (code and fields intact) so `instanceof` and `code` checks work across the boundary.
  */
 export function fromWire(data: WireResult): unknown {
   if (data.ok) {
     return data.result
   }
 
-  if (data.error.issues) {
-    throw new ValidationError(data.error.issues)
+  if (data.error.detail) {
+    throw new TypeportError(data.error.detail)
   }
 
   const error = new Error(data.error.message)
@@ -124,7 +123,7 @@ export function connect(
         return
       }
 
-      closed = reason ?? new Error("Wire closed")
+      closed = reason ?? new TypeportError({ code: "closed" })
 
       if (typeof unsubscribe === "function") {
         unsubscribe()
@@ -150,7 +149,7 @@ export function connect(
             ? undefined
             : setTimeout(() => {
                 pending.delete(id)
-                reject(new Error(`Call to "${path}" timed out after ${timeoutMs}ms`))
+                reject(new TypeportError({ code: "timeout", path, timeoutMs }))
               }, timeoutMs)
 
         pending.set(id, {
@@ -178,7 +177,7 @@ export function connect(
   async function respond(message: { id: number; path: string; payload: unknown }): Promise<void> {
     const result: WireResult = router
       ? await toWire(router.dispatch(message.path, message.payload))
-      : { error: { message: "This end does not serve requests", name: "Error" }, ok: false }
+      : { error: serializeError(new TypeportError({ code: "no-router" })), ok: false }
 
     if (!closed) {
       wire.send({ id: message.id, kind: "res", result })
@@ -187,8 +186,8 @@ export function connect(
 }
 
 function serializeError(error: unknown): Exclude<WireResult, { ok: true }>["error"] {
-  if (error instanceof ValidationError) {
-    return { issues: error.issues, message: error.message, name: error.name }
+  if (error instanceof TypeportError) {
+    return { detail: detailOf(error), message: error.message, name: error.name }
   }
 
   if (error instanceof Error) {

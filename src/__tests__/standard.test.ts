@@ -3,27 +3,31 @@ import { describe, expect, test } from "vitest"
 import * as z from "zod"
 import { createClient } from "../lib/client"
 import { defineContract, event } from "../lib/contract"
+import { TypeportError } from "../lib/error"
 import { createRouter } from "../lib/router"
-import { ValidationError } from "../lib/standard"
 
 const contract = defineContract({
   greet: event({ input: z.object({ name: z.string() }), output: z.string() }),
   notify: event(z.object({ message: z.string() })),
 })
 
-describe("ValidationError", () => {
-  test("client input failures carry Standard Schema issues", async () => {
+describe("TypeportError", () => {
+  test("client input failures carry code validation and Standard Schema issues", async () => {
     const client = createClient(contract, () => "hi")
 
     const error = await client
       .greet({ name: 1 as unknown as string })
       .catch((error: unknown) => error)
 
-    expect(error).toBeInstanceOf(ValidationError)
-    expect((error as ValidationError).issues.length).toBeGreaterThan(0)
+    expect(error).toBeInstanceOf(TypeportError)
+
+    const typeportError = error as Extract<TypeportError, { code: "validation" }>
+
+    expect(typeportError.code).toBe("validation")
+    expect(typeportError.issues.length).toBeGreaterThan(0)
   })
 
-  test("router distinguishes validation failures from resolver failures", async () => {
+  test("router distinguishes library failures from resolver failures", async () => {
     const router = createRouter(contract, {
       greet: () => {
         throw new Error("resolver exploded")
@@ -32,11 +36,15 @@ describe("ValidationError", () => {
     })
 
     const invalid = await router.dispatch("greet", { name: 1 }).catch((error: unknown) => error)
+    const unknown = await router.dispatch("nope", {}).catch((error: unknown) => error)
     const crashed = await router.dispatch("greet", { name: "Ada" }).catch((error: unknown) => error)
 
-    expect(invalid).toBeInstanceOf(ValidationError)
+    expect(invalid).toBeInstanceOf(TypeportError)
+    expect((invalid as TypeportError).code).toBe("validation")
+    expect(unknown).toBeInstanceOf(TypeportError)
+    expect((unknown as TypeportError).code).toBe("unknown-channel")
     expect(crashed).toBeInstanceOf(Error)
-    expect(crashed).not.toBeInstanceOf(ValidationError)
+    expect(crashed).not.toBeInstanceOf(TypeportError)
   })
 })
 

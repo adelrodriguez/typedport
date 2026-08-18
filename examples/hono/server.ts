@@ -55,7 +55,7 @@ app.post("/rpc/:path", async (c) => {
     return c.json(wire, 200)
   }
 
-  return c.json(wire, wire.error.issues ? 400 : 500)
+  return c.json(wire, wire.error.detail?.code === "validation" ? 400 : 500)
 })
 
 serve({ fetch: app.fetch, port: 4322 }, (info) => {
