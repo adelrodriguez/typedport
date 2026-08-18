@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test } from "vitest"
 import * as z from "zod"
 import { defineContract, event } from "../lib/contract"
 import { flatten } from "../lib/utils"

@@ -1,9 +1,15 @@
-// The worker side: a router serving the contract, wired to the worker's message port.
+// The worker side: a router serving the contract, wired to the thread's message port.
+// A browser Web Worker is the same shape — swap parentPort for self.
+import { parentPort } from "node:worker_threads"
 import { createRouter } from "../../src/index.ts"
 import { connect, type Wire } from "../../src/wire.ts"
 import { contract } from "./contract.ts"
 
-declare const self: Worker
+if (!parentPort) {
+  throw new Error("This module must run inside a worker thread")
+}
+
+const port = parentPort
 
 const router = createRouter(contract, {
   "primes.count": ({ below }) => countPrimes(below),
@@ -11,13 +17,10 @@ const router = createRouter(contract, {
 
 const wire: Wire = {
   onMessage: (listener) => {
-    self.addEventListener("message", (event) => {
-      listener(event.data)
-    })
+    port.on("message", listener)
   },
   send: (data) => {
-    // oxlint-disable-next-line require-post-message-target-origin -- Worker.postMessage takes a transfer list, not a targetOrigin
-    self.postMessage(data)
+    port.postMessage(data)
   },
 }
 

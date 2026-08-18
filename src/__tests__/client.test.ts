@@ -1,5 +1,4 @@
-/* oxlint-disable await-thenable, no-confusing-void-expression -- bun:test types async matchers like `.rejects.toThrow()` as void, but they must be awaited for the assertion to complete */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test } from "vitest"
 import * as z from "zod"
 import { createClient } from "../lib/client"
 import { defineContract, event } from "../lib/contract"
@@ -67,6 +66,7 @@ describe("createClient", () => {
     const client = createClient(contract, (path) => ({ messageId: `msg_${path}` }))
 
     // Typed `Promise<void>`, but the raw value stays reachable for edges that want it.
+    // oxlint-disable-next-line no-confusing-void-expression -- deliberately observing the runtime value behind the void type
     const result: unknown = await client.stripe.checkout.created({ id: "evt_123" })
 
     expect(result).toEqual({ messageId: "msg_stripe.checkout.created" })

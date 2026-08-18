@@ -1,5 +1,4 @@
-/* oxlint-disable await-thenable, no-confusing-void-expression -- bun:test types async matchers like `.rejects.toThrow()` as void, but they must be awaited for the assertion to complete */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test } from "vitest"
 import * as z from "zod"
 import { createClient } from "../lib/client"
 import { defineContract, event } from "../lib/contract"
@@ -22,7 +21,9 @@ function createWirePair(): [Wire, Wire] {
     send: (data) => {
       const cloned = structuredClone(data)
       for (const listener of listeners[theirs]) {
-        queueMicrotask(() => listener(cloned))
+        queueMicrotask(() => {
+          listener(cloned)
+        })
       }
     },
   })

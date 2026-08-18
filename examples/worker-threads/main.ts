@@ -1,20 +1,19 @@
 /* oxlint-disable no-console -- runnable example */
 // The main thread: a typed client whose transport is the worker's message port.
 // No JSON here — worker messages are structured-cloned natively.
+import { Worker } from "node:worker_threads"
 import { createClient } from "../../src/index.ts"
 import { connect, type Wire } from "../../src/wire.ts"
 import { contract } from "./contract.ts"
 
-const worker = new Worker(new URL("worker.ts", import.meta.url).href)
+const worker = new Worker(new URL("worker.ts", import.meta.url))
 
 const wire: Wire = {
   onMessage: (listener) => {
-    worker.addEventListener("message", (event) => {
-      listener(event.data)
-    })
+    worker.on("message", listener)
   },
   send: (data) => {
-    // oxlint-disable-next-line require-post-message-target-origin -- Worker.postMessage takes a transfer list, not a targetOrigin
+    // oxlint-disable-next-line require-post-message-target-origin -- worker_threads postMessage takes a transfer list, not a targetOrigin
     worker.postMessage(data)
   },
 }
@@ -30,4 +29,4 @@ await api.primes.count({ below: -1 }).catch((error: unknown) => {
 })
 
 close()
-worker.terminate()
+await worker.terminate()

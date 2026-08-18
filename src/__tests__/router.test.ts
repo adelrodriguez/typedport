@@ -1,5 +1,4 @@
-/* oxlint-disable await-thenable, no-confusing-void-expression -- bun:test types async matchers like `.rejects.toThrow()` as void, but they must be awaited for the assertion to complete */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test } from "vitest"
 import * as z from "zod"
 import { defineContract, event } from "../lib/contract"
 import { createRouter } from "../lib/router"
