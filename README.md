@@ -1,7 +1,7 @@
 <p align="center">
   <h1 align="center">🚌 <code>typeport</code></h1>
   <p align="center">
-    <strong>Type-safe, Proxy-based RPC from a Standard Schema contract tree — transport-agnostic</strong>
+    <strong>Type-safe RPC over any transport</strong>
   </p>
 </p>
 
