@@ -43,6 +43,9 @@
       "default": "./dist/wire.js"
     }
   },
+  "publishConfig": {
+    "provenance": true
+  },
   "scripts": {
     "analyze": "adamantite analyze",
     "build": "tsdown",
