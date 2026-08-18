@@ -20,6 +20,7 @@ It is the transport-agnostic core extracted from [`qstash-events`](https://githu
 - 🔐 **Validated at the boundary** — the router parses input against your schema before any resolver runs, and parses results against `output` on the way out so off-contract resolvers fail loudly
 - 🎯 **One primitive** — `event({ input, output })` is a round trip, `event(schema)` is one-way; every leaf is directly callable on the client
 - 🚚 **Bring your transport** — a transport is a single function `(path, payload) => result`; `router.dispatch` is already one, and real adapters are one-liners
+- 🧵 **`typeport/wire`** — optional subpath for real boundaries: a serializable error envelope, and `connect` to turn any duplex message pipe (MessagePort, worker, WebSocket) into a symmetric, timeout-guarded transport
 
 ## Installation
 
@@ -113,6 +114,37 @@ try {
 
 Authenticity is the transport's job, not the core's: an HTTP adapter verifies signatures, an Electron adapter relies on process identity and a channel allowlist (`router.channels`). The core guarantees one thing everywhere: no resolver runs on unparsed input.
 
+## `typeport/wire`
+
+Two problems every real boundary hits, solved once in an optional subpath export:
+
+**Errors don't survive serialization.** A thrown `ValidationError` gets flattened by `invoke`, structured clone, or JSON. `dispatchToWire`/`fromWire` are the envelope: the server edge flattens every outcome into a serializable value, the client edge unwraps it — rehydrating `ValidationError` with its issues so `instanceof` works across the boundary:
+
+```typescript
+import { dispatchToWire, fromWire } from "typeport/wire"
+
+// server edge — never throws, always returns a serializable WireResult
+ipcMain.handle(channel, (_event, payload) => dispatchToWire(router, channel, payload))
+
+// client edge — unwraps the result or rethrows, ValidationError intact
+const api = createClient(contract, async (path, payload) =>
+  fromWire(await window.typeport.send(path, payload))
+)
+```
+
+**Message pipes have no request/response.** `postMessage`-shaped channels (MessagePorts, workers, WebSockets) need correlation ids, a pending map, timeouts, and teardown. `connect` owns all of that, over a minimal `Wire` — anything that can send a value and hand incoming values to a listener:
+
+```typescript
+import { connect, type Wire } from "typeport/wire"
+
+const { transport, close } = connect(wire, {
+  router,          // serve incoming requests from the peer; omit for a call-only end
+  timeoutMs: 5000, // reject a pending call if no response arrives
+})
+```
+
+`connect` is symmetric: call it on both ends of a duplex pipe, each with its own router, and each side gets a transport for calling the other. It speaks the envelope internally, so error fidelity comes for free. `close(reason?)` rejects everything in flight and future calls — wire it to whatever liveness signal the pipe has (a window's `closed`, a socket's `close`).
+
 ## Recipes
 
 A transport is one function, so the edges are almost embarrassing:
@@ -124,7 +156,17 @@ const qstash = async (path, body) => qstashClient.publishJSON({ url: `${baseUrl}
 const port = createPortTransport(port) // request/response over postMessage, below
 ```
 
-One thing to keep straight: a one-way transport (a queue) paired with a leaf that declares an `output` is a contract error the core cannot catch — the client would resolve the publish receipt as if it were the result. Keep `output` off the leaves a one-way transport serves.
+One thing to keep straight: a one-way transport (a queue) paired with a leaf that declares an `output` is a contract error the core cannot catch at runtime — the client would resolve the publish receipt as if it were the result. Keep `output` off the leaves a one-way transport serves, and make the compiler enforce it: adapters built on one-way delivery should constrain their contract parameter to `OneWayContract`, which rejects any tree containing a round-trip leaf.
+
+A related trick falls out of the one-function design: a transport that awaits another transport is a transport. That makes "the connection isn't ready yet" a non-problem — build the client eagerly over a deferred transport and calls made too early just wait:
+
+```typescript
+const ready = new Promise<Transport>((resolve) => {
+  /* resolve when the port/socket/window arrives */
+})
+
+export const api = createClient(contract, async (path, payload) => (await ready)(path, payload))
+```
 
 <details>
 <summary><strong>Electron IPC</strong> — renderer client, main-process router</summary>
@@ -163,58 +205,91 @@ import { contract } from "./contract"
 export const api = createClient(contract, (path, payload) => window.typeport.send(path, payload))
 ```
 
-One-way leaves ride `invoke` too — the extra empty response is harmless and keeps the edge to a single function. Note that `ipcRenderer.invoke` re-throws only the error message string, so a `ValidationError` from the main process arrives in the renderer as a flat `Error`. If you need structured errors, encode `{ ok, error }` in the resolved value instead (like the MessagePort recipe below). If you load remote content, also check `event.senderFrame` before dispatching.
+One-way leaves ride `invoke` too — the extra empty response is harmless and keeps the edge to a single function. Note that `ipcRenderer.invoke` re-throws only the error message string, so a `ValidationError` from the main process arrives in the renderer as a flat `Error`. If you need structured errors, wrap both edges in the `typeport/wire` envelope: `dispatchToWire(router, channel, payload)` in the `handle` callback, `fromWire(await ...)` in the transport. If you load remote content, also check `event.senderFrame` before dispatching.
 
 </details>
 
 <details>
-<summary><strong>MessagePort / postMessage</strong> — workers, iframes, <code>MessageChannelMain</code></summary>
+<summary><strong>MessagePort / postMessage</strong> — bidirectional: workers, iframes, <code>MessageChannelMain</code></summary>
 
-`postMessage` has no request/response primitive, so the transport adds correlation ids. The same pair works for a Web Worker, an iframe, or Electron utility processes (swap `addEventListener` for `.on` on `MessagePortMain`).
+A port is duplex, so one `connect` per end gives you round trips in *both* directions — each side serves its own contract and calls the other's. The only glue you write is adapting the port flavor to `Wire`:
 
 ```typescript
-// caller side
-import type { Transport } from "typeport"
+import type { Wire } from "typeport/wire"
 
-export function createPortTransport(port: MessagePort): Transport {
-  let nextId = 0
-  const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
+// renderer / worker / iframe: DOM MessagePort
+export const wrapDomPort = (port: MessagePort): Wire => ({
+  send: (data) => port.postMessage(data),
+  onMessage: (listener) => {
+    port.addEventListener("message", (event) => listener(event.data))
+    port.start()
+  },
+})
 
-  port.addEventListener("message", ({ data }) => {
-    const entry = pending.get(data.id)
-    if (!entry) return
-    pending.delete(data.id)
-    data.ok ? entry.resolve(data.result) : entry.reject(new Error(data.error))
+// Electron main / utility process: MessagePortMain
+export const wrapPortMain = (port: Electron.MessagePortMain): Wire => ({
+  send: (data) => port.postMessage(data),
+  onMessage: (listener) => {
+    port.on("message", (event) => listener(event.data))
+    port.start()
+  },
+})
+```
+
+Electron main creates the channel, keeps one end, and ships the other to the page:
+
+```typescript
+import { BrowserWindow, MessageChannelMain } from "electron"
+import { createClient } from "typeport"
+import { connect } from "typeport/wire"
+
+function connectWindow(win: BrowserWindow) {
+  const { port1, port2 } = new MessageChannelMain()
+
+  const { transport, close } = connect(wrapPortMain(port1), {
+    router: mainRouter, // serves the renderer → main contract
+    timeoutMs: 5_000,   // a dead renderer rejects pending calls instead of hanging them
   })
-  port.start()
+  const push = createClient(pushContract, transport) // main → renderer, round trips included
 
-  return (path, payload) =>
-    new Promise((resolve, reject) => {
-      const id = nextId++
-      pending.set(id, { resolve, reject })
-      port.postMessage({ id, path, payload })
-    })
+  win.webContents.once("did-finish-load", () => {
+    win.webContents.postMessage("typeport:port", null, [port2])
+  })
+  win.on("closed", () => close(new Error("window closed")))
+
+  return push
 }
 ```
 
-```typescript
-// handler side
-import type { Router } from "typeport"
+The preload is a relay (a port can't cross `contextBridge`, but `window.postMessage` can transfer it):
 
-export function attachRouter(port: MessagePort, router: Router) {
-  port.addEventListener("message", async ({ data }) => {
-    try {
-      const result = await router.dispatch(data.path, data.payload)
-      port.postMessage({ id: data.id, ok: true, result })
-    } catch (error) {
-      port.postMessage({ id: data.id, ok: false, error: String(error) })
-    }
-  })
-  port.start()
-}
+```typescript
+ipcRenderer.on("typeport:port", (event) => {
+  window.postMessage({ type: "typeport:port" }, "*", event.ports)
+})
 ```
 
-If the other end can die (a crashed utility process), add a timeout around `pending` entries — neither port flavor signals a broken peer.
+The renderer is the mirror image, using a deferred transport so `api` is importable before the port arrives:
+
+```typescript
+import { createClient, createRouter, type Transport } from "typeport"
+import { connect } from "typeport/wire"
+
+const pushRouter = createRouter(pushContract, {
+  // ... resolvers for main → renderer calls
+})
+
+const ready = new Promise<Transport>((resolve) => {
+  window.addEventListener("message", (event) => {
+    if (event.source !== window || event.data?.type !== "typeport:port") return
+    resolve(connect(wrapDomPort(event.ports[0]), { router: pushRouter }).transport)
+  }, { once: true })
+})
+
+export const api = createClient(contract, async (path, payload) => (await ready)(path, payload))
+```
+
+Port messages buffer until the receiving end calls `start()`, and the deferred transport buffers calls until the port lands — no ready-handshake needed. A `ValidationError` thrown by either router arrives on the other side as a real `ValidationError` with its issues. The same wrappers work for Web Workers, iframes, and utility processes; only the port hand-off differs.
 
 </details>
 

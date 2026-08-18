@@ -9,7 +9,7 @@ export default defineConfig({
     onlyImport: Object.keys(packageJson.dependencies),
   },
   dts: true,
-  entry: ["src/index.ts"],
+  entry: ["src/index.ts", "src/wire.ts"],
   fixedExtension: false,
   sourcemap: true,
 })

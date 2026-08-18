@@ -1,5 +1,12 @@
 export { createClient } from "./lib/client"
-export { type ContractTree, defineContract, event, isLeaf, type Leaf } from "./lib/contract"
+export {
+  type ContractTree,
+  defineContract,
+  event,
+  isLeaf,
+  type Leaf,
+  type OneWayContract,
+} from "./lib/contract"
 export { createRouter, type Router } from "./lib/router"
 export { parseWith, ValidationError } from "./lib/standard"
 export type { InferClient, InferResolvers, Transport } from "./lib/types"

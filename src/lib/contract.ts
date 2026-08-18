@@ -14,6 +14,16 @@ export type ContractTree = {
 }
 
 /**
+ * A contract whose leaves are all one-way (no `output` schema). One-way transports (a message
+ * queue, `webContents.send`) can't carry a result back, so an adapter built on one constrains its
+ * contract parameter to this — pairing it with a round-trip leaf becomes a compile error instead
+ * of a call that silently resolves the wrong value.
+ */
+export type OneWayContract = {
+  [key: string]: Leaf<StandardSchemaV1, undefined> | OneWayContract
+}
+
+/**
  * A contract leaf. With `input` and `output` it is a round trip: the client validates `input`
  * before sending, the router validates it again before dispatching, and the resolver's return
  * value is validated against `output` on the way back. With a bare schema (`event(schema)`) it is
