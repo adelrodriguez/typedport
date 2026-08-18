@@ -27,8 +27,12 @@ export function createClient<Tree extends ContractTree>(
       return parentPath
     }
 
-    if (last === "$schema") {
+    if (last === "$input") {
       return getLeaf(leaves, path.slice(0, -1).join(".")).input
+    }
+
+    if (last === "$output") {
+      return getLeaf(leaves, path.slice(0, -1).join(".")).output
     }
 
     // Calls always return a promise: validation and misuse failures reject

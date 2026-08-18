@@ -37,8 +37,8 @@ class TypeportBaseError extends Error {
 }
 
 /**
- * The single error class for every failure the library raises — `code` discriminates, and each
- * code carries its own typed fields:
+ * The single error class for every failure the library raises — `code` discriminates, and each code
+ * carries its own typed fields:
  *
  * - `validation` (`issues`) — a schema rejected a value, on either side of the boundary
  * - `unknown-channel` (`path`) — the path is not in the contract

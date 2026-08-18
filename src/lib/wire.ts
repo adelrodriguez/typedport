@@ -17,9 +17,9 @@ export type WireResult =
 
 /**
  * Captures any operation's outcome as a serializable `WireResult` — never throws. Pass the
- * operation's promise (`toWire(router.dispatch(path, payload))`), or a thunk when the operation
- * can throw synchronously. `fromWire` on the other side is its inverse:
- * `fromWire(await toWire(x))` returns what `x` resolved with, or rethrows what it threw.
+ * operation's promise (`toWire(router.dispatch(path, payload))`), or a thunk when the operation can
+ * throw synchronously. `fromWire` on the other side is its inverse: `fromWire(await toWire(x))`
+ * returns what `x` resolved with, or rethrows what it threw.
  */
 export async function toWire(operation: Promise<unknown> | (() => unknown)): Promise<WireResult> {
   try {
@@ -73,15 +73,21 @@ type PendingEntry = {
  * for a call-only end) and returns a `Transport` for calling the peer, with request/response
  * correlation handled internally. Fully symmetric — call it on both ends with the roles swapped.
  *
+ * A pipe is one peer, so `context` is per-connection: whatever identity the edge established (the
+ * session, the window) is passed to every dispatch this end serves.
+ *
  * `timeoutMs` bounds each outgoing call; without it a dead peer leaves calls pending forever.
  * `close` rejects everything in flight, rejects future calls, and stops serving — wire it to
  * whatever liveness signal the pipe has (a window's `closed`, a socket's `close`).
  */
-export function connect(
+export function connect<Context = void>(
   wire: Wire,
-  options: { router?: Router; timeoutMs?: number } = {}
+  options: { context?: Context; router?: Router<Context>; timeoutMs?: number } = {}
 ): { transport: Transport; close: (reason?: Error) => void } {
-  const { router, timeoutMs } = options
+  const { context, router, timeoutMs } = options
+  const dispatch = router?.dispatch as
+    | ((path: string, raw: unknown, context?: Context) => Promise<unknown>)
+    | undefined
   const pending = new Map<number, PendingEntry>()
   let nextId = 0
   let closed: Error | undefined
@@ -175,8 +181,8 @@ export function connect(
   }
 
   async function respond(message: { id: number; path: string; payload: unknown }): Promise<void> {
-    const result: WireResult = router
-      ? await toWire(router.dispatch(message.path, message.payload))
+    const result: WireResult = dispatch
+      ? await toWire(dispatch(message.path, message.payload, context))
       : { error: serializeError(new TypeportError({ code: "no-router" })), ok: false }
 
     if (!closed) {

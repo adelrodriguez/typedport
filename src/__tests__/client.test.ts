@@ -72,12 +72,17 @@ describe("createClient", () => {
     expect(result).toEqual({ messageId: "msg_stripe.checkout.created" })
   })
 
-  test("exposes $path and $schema helpers", () => {
+  test("exposes $path, $input, and $output helpers", () => {
     const { client } = createTestClient()
 
     expect(client.stripe.checkout.created.$path).toBe("stripe.checkout.created")
     expect(client.localFiles.save.$path).toBe("localFiles.save")
-    expect(client.localFiles.save.$schema).toBe(LocalTextFile)
+
+    // For a bare-schema leaf, the schema is the input; there is no output.
+    expect(client.localFiles.save.$input).toBe(LocalTextFile)
+    expect(client.localFiles.save.$output).toBeUndefined()
+
+    expect(client.localFiles.open.$output).not.toBeUndefined()
   })
 
   test("rejects unknown channels", async () => {

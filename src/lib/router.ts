@@ -4,7 +4,7 @@ import { TypeportError } from "./error"
 import { parseWith } from "./standard"
 import { flatten } from "./utils"
 
-export type Router = {
+export type Router<Context = void> = {
   /**
    * Every dotted path in the contract. Adapters use this to register transport endpoints (IPC
    * channels, routes) and to build allowlists.
@@ -18,36 +18,46 @@ export type Router = {
    * (one-way results are discarded). Library failures throw `TypeportError` (`validation`,
    * `unknown-channel`); anything else escaping `dispatch` came from the resolver.
    *
-   * `dispatch` is a valid `Transport` — passing it to `createClient` wires the whole stack
-   * in-memory.
+   * `context` is whatever the edge knows about the caller (the authenticated user, the sender
+   * identity) and reaches every resolver untouched. With the default `Context = void` the argument
+   * disappears, and `dispatch` is a valid `Transport` — passing it to `createClient` wires the
+   * whole stack in-memory.
    */
-  dispatch: (path: string, raw: unknown) => Promise<unknown>
+  dispatch: (
+    path: string,
+    raw: unknown,
+    // oxlint-disable-next-line no-invalid-void-type -- void is the no-context sentinel; it makes the argument disappear entirely
+    ...context: Context extends void ? [] : [context: Context]
+  ) => Promise<unknown>
 }
 
-export function createRouter<Tree extends ContractTree>(
+/**
+ * Builds the validating dispatcher for a contract. Declare a context type explicitly when the edge
+ * supplies one: `createRouter<typeof contract, Session>(contract, resolvers)`.
+ */
+export function createRouter<Tree extends ContractTree, Context = void>(
   contract: Tree,
-  resolvers: InferResolvers<Tree>
-): Router {
+  resolvers: InferResolvers<Tree, Context>
+): Router<Context> {
   const leaves = flatten(contract)
-  const resolverMap = resolvers as Record<string, (input: unknown) => unknown>
+  const resolverMap = resolvers as Record<string, (input: unknown, context?: Context) => unknown>
 
-  return {
-    channels: Object.keys(leaves),
-    async dispatch(path, raw) {
-      const leaf = leaves[path]
-      const resolver = resolverMap[path]
+  const dispatch = async (path: string, raw: unknown, context?: Context): Promise<unknown> => {
+    const leaf = leaves[path]
+    const resolver = resolverMap[path]
 
-      if (!(leaf && resolver)) {
-        throw new TypeportError({ code: "unknown-channel", path })
-      }
+    if (!(leaf && resolver)) {
+      throw new TypeportError({ code: "unknown-channel", path })
+    }
 
-      const result = await resolver(await parseWith(leaf.input, raw))
+    const result = await resolver(await parseWith(leaf.input, raw), context)
 
-      if (!leaf.output) {
-        return
-      }
+    if (!leaf.output) {
+      return
+    }
 
-      return await parseWith(leaf.output, result)
-    },
+    return await parseWith(leaf.output, result)
   }
+
+  return { channels: Object.keys(leaves), dispatch }
 }

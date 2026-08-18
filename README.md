@@ -68,7 +68,23 @@ const router = createRouter(contract, {
 await router.dispatch("localFiles.save", rawInput)
 ```
 
-`InferResolvers<typeof contract>` exists for when the resolver map is defined away from the `createRouter` call (another file, built up incrementally) and needs a standalone type to check against.
+Resolvers also receive a **context** — whatever the edge knows about the caller (the authenticated user, `event.senderFrame`, the socket session). Declare its type explicitly and the edge supplies it per dispatch:
+
+```typescript
+type Session = { userId: string }
+
+const router = createRouter<typeof contract, Session>(contract, {
+  "localFiles.open": async (_input, session) => openFile(session.userId),
+  "localFiles.save": async ({ path, contents }, session) => save(session.userId, path, contents),
+  "stripe.checkout.created": async ({ id }) => record(id), // context is optional to use
+})
+
+await router.dispatch("localFiles.save", rawInput, { userId: authenticate(request) })
+```
+
+With the default `Context = void`, the third argument disappears and `dispatch` stays a valid two-argument `Transport`.
+
+`InferResolvers<typeof contract, Context>` exists for when the resolver map is defined away from the `createRouter` call (another file, built up incrementally) and needs a standalone type to check against.
 
 Call it with a client. A transport is one function; every leaf is directly callable:
 
@@ -82,7 +98,8 @@ await client.localFiles.save({ path: "/tmp/a.txt", contents: "hi" })
 await client.stripe.checkout.created({ id: "evt_123" })
 
 client.localFiles.save.$path // "localFiles.save"
-client.localFiles.save.$schema // the input schema
+client.localFiles.save.$input // the input schema — for a bare-schema leaf, the schema itself
+client.localFiles.open.$output // the output schema, or undefined on one-way leaves
 ```
 
 Leaves with an `output` schema resolve with the result; one-way leaves are typed `Promise<void>`. Input is validated at the call site before it reaches the transport, and the router validates again on arrival.
@@ -97,7 +114,7 @@ const client = createClient(contract, router.dispatch)
 
 Input is parsed twice by design. The client parses before sending so the caller gets an error with a stack trace at the call site. The router parses again before dispatching because the sender may not be your client at all — in transports like Electron IPC the receiving process must treat every message as untrusted. Only the router's parse is a security boundary.
 
-Every failure the library raises is a `TypeportError`, discriminated by `code` — `validation` (with the Standard Schema `issues`), `unknown-channel` (with the `path`), and the `connect` lifecycle codes `timeout`, `closed`, and `no-router`. One `instanceof`, then `code` narrows the fields; anything that is *not* a `TypeportError` came from application code:
+Every failure the library raises is a `TypeportError`, discriminated by `code` — `validation` (with the Standard Schema `issues`), `unknown-channel` (with the `path`), and the `connect` lifecycle codes `timeout`, `closed`, and `no-router`. One `instanceof`, then `code` narrows the fields; anything that is _not_ a `TypeportError` came from application code:
 
 ```typescript
 import { TypeportError } from "typeport"
@@ -141,6 +158,7 @@ import { connect, type Wire } from "typeport/wire"
 
 const { transport, close } = connect(wire, {
   router, // serve incoming requests from the peer; omit for a call-only end
+  context: session, // per-connection: passed to every dispatch this end serves
   timeoutMs: 5000, // reject a pending call if no response arrives
 })
 ```

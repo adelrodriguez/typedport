@@ -3,8 +3,8 @@ import { TypeportError } from "./error"
 
 /**
  * Parses a value against any Standard Schema, throwing `TypeportError` (code `validation`, issues
- * attached) on failure. This is the single parse primitive the client and router use; edge
- * adapters can reuse it to validate before their own publish paths.
+ * attached) on failure. This is the single parse primitive the client and router use; edge adapters
+ * can reuse it to validate before their own publish paths.
  */
 export async function parseWith<Schema extends StandardSchemaV1>(
   schema: Schema,

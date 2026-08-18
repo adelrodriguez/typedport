@@ -2,9 +2,9 @@
 // One Hono route serves the entire contract. No per-route validators: the
 // router parses input before any resolver runs and parses results on the way
 // back. toWire never throws, so every outcome maps to a status code.
+import type * as z from "zod"
 import { serve } from "@hono/node-server"
 import { Hono } from "hono"
-import type * as z from "zod"
 import { createRouter } from "../../src/index.ts"
 import { toWire } from "../../src/wire.ts"
 import { contract, type Todo } from "./contract.ts"

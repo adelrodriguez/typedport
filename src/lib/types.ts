@@ -18,16 +18,21 @@ type MaybePromise<T> = Promise<T> | T
  */
 export type Transport = (path: string, payload: unknown) => MaybePromise<unknown>
 
-type LeafHelpers<Schema extends StandardSchemaV1> = {
+type LeafHelpers<Input extends StandardSchemaV1, Output extends StandardSchemaV1 | undefined> = {
   /**
    * The dotted path to this leaf (e.g., "localFiles.open").
    */
   $path: string
 
   /**
-   * The schema for this leaf's input.
+   * The schema for this leaf's input — for a bare-schema leaf (`event(schema)`), the schema itself.
    */
-  $schema: Schema
+  $input: Input
+
+  /**
+   * The schema for this leaf's output, or `undefined` for a one-way leaf.
+   */
+  $output: Output
 }
 
 /**
@@ -37,7 +42,7 @@ type LeafHelpers<Schema extends StandardSchemaV1> = {
  */
 export type InferClient<Tree> = {
   [Key in keyof Tree]: Tree[Key] extends Leaf<infer Input, infer Output>
-    ? LeafHelpers<Input> &
+    ? LeafHelpers<Input, Output> &
         (Output extends StandardSchemaV1
           ? (
               input: StandardSchemaV1.InferInput<Input>
@@ -48,22 +53,28 @@ export type InferClient<Tree> = {
 
 type Join<Prefix extends string, Key extends string> = Prefix extends "" ? Key : `${Prefix}.${Key}`
 
-type FlatLeaves<Tree, Prefix extends string = ""> = {
+type FlatLeaves<Tree, Context, Prefix extends string = ""> = {
   [Key in keyof Tree & string]: Tree[Key] extends Leaf<infer Input, infer Output>
     ? Output extends StandardSchemaV1
       ? Record<
           Join<Prefix, Key>,
           (
-            input: StandardSchemaV1.InferOutput<Input>
+            input: StandardSchemaV1.InferOutput<Input>,
+            context: Context
           ) => MaybePromise<StandardSchemaV1.InferInput<Output>>
         >
-      : Record<Join<Prefix, Key>, (input: StandardSchemaV1.InferOutput<Input>) => unknown>
-    : FlatLeaves<Tree[Key], Join<Prefix, Key>>
+      : Record<
+          Join<Prefix, Key>,
+          (input: StandardSchemaV1.InferOutput<Input>, context: Context) => unknown
+        >
+    : FlatLeaves<Tree[Key], Context, Join<Prefix, Key>>
 }[keyof Tree & string]
 
 /**
  * The flat resolver map for a contract, keyed by dotted path. Resolvers receive parsed input (the
- * schema's output type, after defaults and coercions). A leaf with an `output` schema must return
- * something it accepts; a one-way leaf's resolver may return anything — the router discards it.
+ * schema's output type, after defaults and coercions) and the context the edge passed to `dispatch`
+ * — the authenticated user, the sender identity, whatever the transport knows. A leaf with an
+ * `output` schema must return something it accepts; a one-way leaf's resolver may return anything —
+ * the router discards it.
  */
-export type InferResolvers<Tree> = UnionToIntersection<FlatLeaves<Tree>>
+export type InferResolvers<Tree, Context = void> = UnionToIntersection<FlatLeaves<Tree, Context>>

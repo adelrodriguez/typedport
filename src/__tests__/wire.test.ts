@@ -140,6 +140,24 @@ describe("connect", () => {
     expect(typeportError.timeoutMs).toBe(20)
   })
 
+  test("passes per-connection context to the served router", async () => {
+    const [serverWire, clientWire] = createWirePair()
+    const seen: string[] = []
+
+    const router = createRouter<typeof pullContract, { sessionId: string }>(pullContract, {
+      "math.add": ({ a, b }, session) => {
+        seen.push(session.sessionId)
+        return a + b
+      },
+    })
+
+    connect(serverWire, { context: { sessionId: "s1" }, router })
+    const { transport } = connect(clientWire)
+
+    await expect(Promise.resolve(transport("math.add", { a: 2, b: 3 }))).resolves.toBe(5)
+    expect(seen).toEqual(["s1"])
+  })
+
   test("close rejects pending and future calls", async () => {
     const [wire] = createWirePair() // peer end never connected
     const { close, transport } = connect(wire)

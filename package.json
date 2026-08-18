@@ -60,10 +60,12 @@
   },
   "devDependencies": {
     "@changesets/cli": "^3.0.0",
+    "@hono/node-server": "^2.1.1",
     "@types/node": "^26.0.0",
     "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^4.0.0",
     "adamantite": "^0.35.0",
+    "hono": "^4.13.2",
     "knip": "^6.32.2",
     "oxfmt": "^0.63.0",
     "oxlint": "^1.78.0",

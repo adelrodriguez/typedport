@@ -66,6 +66,24 @@ describe("createRouter", () => {
     await expect(router.dispatch("math.add", { a: 1, b: 2 })).rejects.toThrow()
   })
 
+  test("passes the edge's context to every resolver", async () => {
+    const seen: string[] = []
+    const router = createRouter<typeof contract, { userId: string }>(contract, {
+      "math.add": ({ a, b }, session) => {
+        seen.push(session.userId)
+        return a + b
+      },
+      notify: (_payload, session) => {
+        seen.push(session.userId)
+      },
+    })
+
+    await expect(router.dispatch("math.add", { a: 1, b: 2 }, { userId: "ada" })).resolves.toBe(3)
+    await router.dispatch("notify", { message: "hi" }, { userId: "grace" })
+
+    expect(seen).toEqual(["ada", "grace"])
+  })
+
   test("dispatches one-way leaves, discarding the resolver's result", async () => {
     const received: string[] = []
     const router = createRouter(contract, {
