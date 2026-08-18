@@ -32,8 +32,16 @@ export async function toWire(operation: Promise<unknown> | (() => unknown)): Pro
 /**
  * Unwraps a `WireResult`: returns the result, or rethrows the failure — with `TypeportError`
  * rehydrated (code and fields intact) so `instanceof` and `code` checks work across the boundary.
+ *
+ * Takes `unknown` because at a real boundary the value is untrusted: a gateway error page or a
+ * proxy 502 is not an envelope, and that raises a clear error here instead of an opaque `TypeError`
+ * downstream.
  */
-export function fromWire(data: WireResult): unknown {
+export function fromWire(data: unknown): unknown {
+  if (!isEnvelope(data)) {
+    throw new Error("fromWire received a value that is not a WireResult envelope")
+  }
+
   if (data.ok) {
     return data.result
   }
@@ -45,6 +53,20 @@ export function fromWire(data: WireResult): unknown {
   const error = new Error(data.error.message)
   error.name = data.error.name
   throw error
+}
+
+function isEnvelope(data: unknown): data is WireResult {
+  if (typeof data !== "object" || data === null || !("ok" in data)) {
+    return false
+  }
+
+  const candidate = data as { error?: unknown; ok: unknown }
+
+  if (candidate.ok === true) {
+    return true
+  }
+
+  return candidate.ok === false && typeof candidate.error === "object" && candidate.error !== null
 }
 
 /**
@@ -195,7 +217,8 @@ export function connect<Context = void>(
 
   async function respond(message: { id: number; path: string; payload: unknown }): Promise<void> {
     const result: WireResult = dispatch
-      ? await toWire(dispatch(message.path, message.payload, context))
+      ? // The thunk form lets toWire capture even a synchronously-throwing dispatch.
+        await toWire(() => dispatch(message.path, message.payload, context))
       : { error: serializeError(new TypeportError({ code: "no-router" })), ok: false }
 
     if (!closed) {

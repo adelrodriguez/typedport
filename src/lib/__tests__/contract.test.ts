@@ -64,6 +64,16 @@ describe("defineContract", () => {
     ).toThrow('Reserved key "$helpers"')
   })
 
+  test("rejects keys containing a dot", () => {
+    expect(() =>
+      defineContract({
+        stripe: { "checkout.created": event(z.object({ id: z.string() })) },
+      })
+    ).toThrow(
+      'Key "checkout.created" at "stripe.checkout.created" in contract must not contain "."'
+    )
+  })
+
   test("allows publish as an ordinary key", () => {
     const tree = defineContract({
       publish: { created: event(z.object({ id: z.string() })) },

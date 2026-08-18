@@ -3,7 +3,7 @@
 // The transport declares per-call options — the contract knows nothing about
 // HTTP, but a call site can still pick GET or attach an AbortSignal.
 import { createClient, TypeportError } from "../../src/index.ts"
-import { fromWire, type WireResult } from "../../src/wire.ts"
+import { fromWire } from "../../src/wire.ts"
 import { contract } from "./contract.ts"
 
 const baseUrl = "http://localhost:4322"
@@ -24,7 +24,14 @@ const api = createClient(contract, async (path, payload, options?: CallOptions) 
           signal: options?.signal,
         })
 
-  return fromWire((await response.json()) as WireResult)
+  // A proxy or gateway can answer with a non-JSON body; surface that as a
+  // readable error instead of a JSON SyntaxError. fromWire validates the
+  // envelope shape itself.
+  const body: unknown = await response.json().catch(() => {
+    throw new Error(`Non-JSON response from ${path} (status ${response.status})`)
+  })
+
+  return fromWire(body)
 })
 
 const created = await api.todos.create({ title: "ship typeport" })

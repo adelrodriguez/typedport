@@ -41,7 +41,7 @@ const app = new Hono()
 // Every response this route family produces — success or failure, any door —
 // is a WireResult envelope, so the client's unconditional fromWire always has
 // something it can read.
-const fail = (c: Context, message: string, status: 400 | 404 | 405) =>
+const fail = (c: Context, message: string, status: 400 | 404 | 405 | 500) =>
   c.json({ error: { message, name: "Error" }, ok: false } satisfies WireResult, status)
 
 // JSON has no undefined, so the client sends null for void inputs; map it
@@ -49,7 +49,9 @@ const fail = (c: Context, message: string, status: 400 | 404 | 405) =>
 // which HTTP door a call came through.
 const respond = async (c: Context, path: string, input: unknown) => {
   if (!router.channels.includes(path)) {
-    return fail(c, `Unknown channel: "${path}"`, 404)
+    // Fixed strings only: echoing the untrusted path back is a habit that
+    // turns unsafe the day a response is rendered as HTML.
+    return fail(c, "Unknown channel", 404)
   }
 
   const wire = await toWire(router.dispatch(path, input ?? undefined))
@@ -58,13 +60,29 @@ const respond = async (c: Context, path: string, input: unknown) => {
     return c.json(wire, 200)
   }
 
-  return c.json(wire, wire.error.detail?.code === "validation" ? 400 : 500)
+  if (wire.error.detail) {
+    return c.json(wire, wire.error.detail.code === "validation" ? 400 : 500)
+  }
+
+  // A failure without detail came from application code — a database error, a
+  // filesystem error. Its message is for the server's logs, not for an
+  // untrusted caller.
+  console.error(`resolver failed for "${path}":`, wire.error)
+  return fail(c, "Internal server error", 500)
 }
 
 // Dotted paths have no slashes, so each one is a single URL segment.
-app.post("/rpc/:path", async (c) =>
-  respond(c, c.req.param("path"), (await c.req.json()) as unknown)
-)
+app.post("/rpc/:path", async (c) => {
+  let input: unknown
+
+  try {
+    input = await c.req.json()
+  } catch {
+    return fail(c, "Malformed request body", 400)
+  }
+
+  return respond(c, c.req.param("path"), input)
+})
 
 // Reads may ride GET (cacheable, prefetchable); the input travels in the
 // query string. GET is a door browsers and prefetchers treat as safe to
@@ -84,7 +102,7 @@ app.get("/rpc/:path", async (c) => {
   const path = c.req.param("path")
 
   if (!reads.has(path)) {
-    return fail(c, `"${path}" is not a query; use POST`, 405)
+    return fail(c, "Not a query; use POST", 405)
   }
 
   let input: unknown

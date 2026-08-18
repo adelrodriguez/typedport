@@ -62,6 +62,12 @@ export function defineContract<Tree extends ContractTree>(tree: Tree): Tree {
     if (key.startsWith("$") || key === "_kind") {
       throw new Error(`Reserved key "${key}" at "${path}" in contract`)
     }
+
+    if (key.includes(".")) {
+      // Dotted paths are derived by flatten; a literal dot in a key would
+      // silently collide with the equivalent nested tree.
+      throw new Error(`Key "${key}" at "${path}" in contract must not contain "."`)
+    }
   }
 
   return tree

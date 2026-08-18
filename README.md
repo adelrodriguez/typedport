@@ -227,9 +227,19 @@ const handle = async (request: Request): Promise<Response> => {
   // back so z.void() leaves round-trip.
   const wire = await toWire(router.dispatch(path, (await request.json()) ?? undefined))
 
-  return Response.json(wire, {
-    status: wire.ok ? 200 : wire.error.detail?.code === "validation" ? 400 : 500,
-  })
+  if (wire.ok || wire.error.detail) {
+    return Response.json(wire, {
+      status: wire.ok ? 200 : wire.error.detail?.code === "validation" ? 400 : 500,
+    })
+  }
+
+  // No detail means application code failed — its message belongs in the
+  // server's logs, not in a response to an untrusted caller.
+  console.error(wire.error)
+  return Response.json(
+    { ok: false, error: { message: "Internal server error", name: "Error" } },
+    { status: 500 }
+  )
 }
 ```
 

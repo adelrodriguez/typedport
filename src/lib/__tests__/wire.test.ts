@@ -233,6 +233,17 @@ describe("toWire / fromWire", () => {
     expect((error as TypeportError).code).toBe("validation")
   })
 
+  test("rejects values that are not envelopes with a clear error", () => {
+    for (const garbage of [
+      null,
+      "502 Bad Gateway",
+      { message: "not an envelope" },
+      { ok: false },
+    ]) {
+      expect(() => fromWire(garbage)).toThrow("not a WireResult envelope")
+    }
+  })
+
   test("captures operations that are not dispatch, including sync throws", async () => {
     await expect(toWire(Promise.resolve("receipt"))).resolves.toEqual({
       ok: true,

@@ -26,7 +26,15 @@ const ready = new Promise<Transport>((resolve) => {
       },
     }
 
-    resolve(connect(wire, { router: pushRouter, timeoutMs: 5000 }).transport)
+    const session = connect(wire, { router: pushRouter, timeoutMs: 5000 })
+
+    // Wire the socket's liveness signal to the session: in-flight calls get a
+    // fast `closed` rejection instead of waiting out the timeout.
+    ws.addEventListener("close", () => {
+      session.close(new Error("socket closed"))
+    })
+
+    resolve(session.transport)
   })
 })
 
