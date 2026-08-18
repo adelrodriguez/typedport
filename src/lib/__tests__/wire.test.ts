@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 import * as z from "zod"
 import { createClient } from "../client"
 import { defineContract, event } from "../contract"
@@ -178,22 +178,28 @@ describe("connect", () => {
   })
 
   test("survives a synchronously-throwing send without leaking pending entries", async () => {
-    const [silent] = createWirePair()
-    const wire: Wire = {
-      onMessage: silent.onMessage,
-      send: () => {
-        throw new Error("DataCloneError: not cloneable")
-      },
+    vi.useFakeTimers()
+
+    try {
+      const [silent] = createWirePair()
+      const wire: Wire = {
+        onMessage: silent.onMessage,
+        send: () => {
+          throw new Error("DataCloneError: not cloneable")
+        },
+      }
+      const { transport } = connect(wire, { timeoutMs: 1000 })
+
+      await expect(Promise.resolve(transport("math.add", { a: 1, b: 2 }))).rejects.toThrow(
+        "not cloneable"
+      )
+
+      // The entry's timeout timer is armed in the same block that registers the
+      // pending entry; a leak leaves it live, and this catches it.
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
     }
-    const { close, transport } = connect(wire)
-
-    await expect(Promise.resolve(transport("math.add", { a: 1, b: 2 }))).rejects.toThrow(
-      "not cloneable"
-    )
-
-    // close() rejects whatever is still pending — if the failed send leaked its
-    // entry, this would double-settle and vitest would report it.
-    close()
   })
 })
 

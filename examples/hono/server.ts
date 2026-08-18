@@ -6,7 +6,7 @@ import type * as z from "zod"
 import { serve } from "@hono/node-server"
 import { type Context, Hono } from "hono"
 import { createRouter } from "../../src/index.ts"
-import { toWire } from "../../src/wire.ts"
+import { toWire, type WireResult } from "../../src/wire.ts"
 import { contract, type Todo } from "./contract.ts"
 
 const todos = new Map<string, z.infer<typeof Todo>>()
@@ -61,10 +61,33 @@ app.post("/rpc/:path", async (c) =>
 )
 
 // Reads may ride GET (cacheable, prefetchable); the input travels in the
-// query string. The client picks the door via per-call options.
-app.get("/rpc/:path", (c) =>
-  respond(c, c.req.param("path"), JSON.parse(c.req.query("input") ?? "null") as unknown)
-)
+// query string. GET is a door browsers and prefetchers treat as safe to
+// repeat, so only allowlisted read paths go through it — everything else,
+// including mutations, must knock on POST.
+const reads = new Set<string>(["todos.list"])
+
+app.get("/rpc/:path", async (c) => {
+  const path = c.req.param("path")
+
+  if (!reads.has(path)) {
+    return c.text("Not a query; use POST", 405)
+  }
+
+  let input: unknown
+
+  try {
+    input = JSON.parse(c.req.query("input") ?? "null")
+  } catch {
+    // Keep the failure in the same envelope shape the client's fromWire reads.
+    const wire = {
+      error: { message: "Malformed input query parameter", name: "Error" },
+      ok: false,
+    } satisfies WireResult
+    return c.json(wire, 400)
+  }
+
+  return respond(c, path, input)
+})
 
 serve({ fetch: app.fetch, port: 4322 }, (info) => {
   console.log(`listening on http://localhost:${info.port}`)
