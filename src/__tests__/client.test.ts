@@ -92,3 +92,53 @@ describe("createClient", () => {
     await expect(tree.localFiles.rename()).rejects.toThrow('Unknown channel: "localFiles.rename"')
   })
 })
+
+describe("per-call options", () => {
+  const optionsContract = defineContract({
+    greet: event({ input: z.object({ name: z.string() }), output: z.string() }),
+    misc: {
+      ping: event({ input: z.void(), output: z.string() }),
+    },
+  })
+
+  function createRecordingClient() {
+    const seen: unknown[] = []
+    const client = createClient(
+      optionsContract,
+      (path, _payload, options?: { a?: number; b?: number }) => {
+        seen.push(options)
+        return `ok:${path}`
+      }
+    )
+
+    return { client, seen }
+  }
+
+  test("forwards per-call options to the transport", async () => {
+    const { client, seen } = createRecordingClient()
+
+    await client.greet({ name: "Ada" }, { a: 1 })
+    await client.greet({ name: "Ada" })
+
+    expect(seen).toEqual([{ a: 1 }, undefined])
+  })
+
+  test("$with binds options without disturbing the input slot", async () => {
+    const { client, seen } = createRecordingClient()
+
+    await expect(client.$with({ a: 1 }).misc.ping()).resolves.toBe("ok:misc.ping")
+
+    expect(seen).toEqual([{ a: 1 }])
+  })
+
+  test("$with works on subtrees, chains, and merges per-call over bound", async () => {
+    const { client, seen } = createRecordingClient()
+
+    const bound = client.$with({ a: 1, b: 1 })
+    await bound.greet({ name: "Ada" }, { b: 2 })
+    await bound.$with({ a: 3 }).greet({ name: "Ada" })
+    await client.misc.$with({ b: 4 }).ping()
+
+    expect(seen).toEqual([{ a: 1, b: 2 }, { a: 3, b: 1 }, { b: 4 }])
+  })
+})

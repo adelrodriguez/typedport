@@ -4,7 +4,7 @@
 // back. toWire never throws, so every outcome maps to a status code.
 import type * as z from "zod"
 import { serve } from "@hono/node-server"
-import { Hono } from "hono"
+import { type Context, Hono } from "hono"
 import { createRouter } from "../../src/index.ts"
 import { toWire } from "../../src/wire.ts"
 import { contract, type Todo } from "./contract.ts"
@@ -38,25 +38,33 @@ const app = new Hono()
 // Edge concerns (auth, logging, rate limits) go here as ordinary middleware:
 // app.use("/rpc/*", authMiddleware)
 
-app.post("/rpc/:path", async (c) => {
-  // Dotted paths have no slashes, so each one is a single URL segment.
-  const path = c.req.param("path")
-
+// JSON has no undefined, so the client sends null for void inputs; map it
+// back so z.void() leaves round-trip. The router neither knows nor cares
+// which HTTP door a call came through.
+const respond = async (c: Context, path: string, input: unknown) => {
   if (!router.channels.includes(path)) {
     return c.text("Unknown channel", 404)
   }
 
-  // JSON has no undefined, so the client sends null for void inputs; map it
-  // back so z.void() leaves round-trip.
-  const body = (await c.req.json()) as unknown
-  const wire = await toWire(router.dispatch(path, body ?? undefined))
+  const wire = await toWire(router.dispatch(path, input ?? undefined))
 
   if (wire.ok) {
     return c.json(wire, 200)
   }
 
   return c.json(wire, wire.error.detail?.code === "validation" ? 400 : 500)
-})
+}
+
+// Dotted paths have no slashes, so each one is a single URL segment.
+app.post("/rpc/:path", async (c) =>
+  respond(c, c.req.param("path"), (await c.req.json()) as unknown)
+)
+
+// Reads may ride GET (cacheable, prefetchable); the input travels in the
+// query string. The client picks the door via per-call options.
+app.get("/rpc/:path", (c) =>
+  respond(c, c.req.param("path"), JSON.parse(c.req.query("input") ?? "null") as unknown)
+)
 
 serve({ fetch: app.fetch, port: 4322 }, (info) => {
   console.log(`listening on http://localhost:${info.port}`)

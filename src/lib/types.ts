@@ -15,8 +15,17 @@ type MaybePromise<T> = Promise<T> | T
  * one, `(path, input) => ipcRenderer.invoke(path, input)` is another. One-way transports (a message
  * queue) just resolve with nothing useful; pair them with contracts whose leaves declare no
  * `output`.
+ *
+ * A transport may declare a third `options` parameter — per-call edge mechanics (an `AbortSignal`,
+ * an Electron transfer list, an HTTP method) that never travel in the payload. Its type is inferred
+ * from the annotation and flows to every call site and to the client's `$with`. With the default
+ * `never`, the options surface does not exist.
  */
-export type Transport = (path: string, payload: unknown) => MaybePromise<unknown>
+export type Transport<Options = never> = (
+  path: string,
+  payload: unknown,
+  options?: Options
+) => MaybePromise<unknown>
 
 type LeafHelpers<Input extends StandardSchemaV1, Output extends StandardSchemaV1 | undefined> = {
   /**
@@ -38,18 +47,23 @@ type LeafHelpers<Input extends StandardSchemaV1, Output extends StandardSchemaV1
 /**
  * The Proxy-backed client shape for a contract: every leaf is directly callable — leaves with an
  * `output` schema resolve with the result, one-way leaves resolve `void` — and every leaf carries
- * `$`-helpers.
+ * `$`-helpers. When the transport declares options, every call accepts them positionally and every
+ * level of the tree exposes `$with(options)`, which returns the same (sub)client with those options
+ * bound — per-call options shallow-merge over bound ones.
  */
-export type InferClient<Tree> = {
+export type InferClient<Tree, Options = never> = {
   [Key in keyof Tree]: Tree[Key] extends Leaf<infer Input, infer Output>
     ? LeafHelpers<Input, Output> &
         (Output extends StandardSchemaV1
           ? (
-              input: StandardSchemaV1.InferInput<Input>
+              input: StandardSchemaV1.InferInput<Input>,
+              options?: Options
             ) => Promise<StandardSchemaV1.InferOutput<Output>>
-          : (input: StandardSchemaV1.InferInput<Input>) => Promise<void>)
-    : InferClient<Tree[Key]>
-}
+          : (input: StandardSchemaV1.InferInput<Input>, options?: Options) => Promise<void>)
+    : InferClient<Tree[Key], Options>
+} & ([Options] extends [never]
+  ? unknown
+  : { $with: (options: Options) => InferClient<Tree, Options> })
 
 type Join<Prefix extends string, Key extends string> = Prefix extends "" ? Key : `${Prefix}.${Key}`
 

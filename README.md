@@ -19,7 +19,7 @@ It is the transport-agnostic core extracted from [`qstash-events`](https://githu
 - 🌲 **Nested contracts** — organize operations as a tree (`localFiles.open`); dotted paths are derived automatically
 - 🔐 **Validated at the boundary** — the router parses input against your schema before any resolver runs, and parses results against `output` on the way out so off-contract resolvers fail loudly
 - 🎯 **One primitive** — `event({ input, output })` is a round trip, `event(schema)` is one-way; every leaf is directly callable on the client
-- 🚚 **Bring your transport** — a transport is a single function `(path, payload) => result`; `router.dispatch` is already one, and real adapters are one-liners
+- 🚚 **Bring your transport** — a transport is a single function `(path, payload, options?) => result`; `router.dispatch` is already one, real adapters are one-liners, and per-call options (an `AbortSignal`, a transfer list) flow through untouched via `$with` or positionally
 - 🧵 **`typeport/wire`** — optional subpath for real boundaries: a serializable error envelope, and `connect` to turn any duplex message pipe (MessagePort, worker, WebSocket) into a symmetric, timeout-guarded transport
 
 ## Installation
@@ -109,6 +109,24 @@ Leaves with an `output` schema resolve with the result; one-way leaves are typed
 ```typescript
 const client = createClient(contract, router.dispatch)
 ```
+
+### Per-call options
+
+A transport may declare a third `options` parameter — per-call edge mechanics (an `AbortSignal`, an Electron transfer list, an HTTP method) that never travel in the payload. The type is inferred from the transport's own annotation and flows to every call site; `$with(options)` on the root or any subtree returns the same client with options bound, so leaves with `void` inputs need no `undefined` placeholder:
+
+```typescript
+const api = createClient(contract, async (path, payload, options?: { signal?: AbortSignal }) => {
+  return await sendOverTheWire(path, payload, options?.signal)
+})
+
+await api.localFiles.save(file, { signal: controller.signal }) // positional
+await api.$with({ signal: controller.signal }).localFiles.open() // bound
+
+const cancellable = api.$with({ signal: controller.signal })
+await cancellable.stripe.checkout.created({ id: "evt_123" }) // bound options apply to every call
+```
+
+Per-call options shallow-merge over bound ones. When the transport declares no options, none of this surface exists — calls are `(input)` and `$with` is not in the type.
 
 ## Validation model
 
