@@ -1,6 +1,6 @@
 {
   "name": "typeport",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Type-safe, Proxy-based RPC from a Standard Schema contract tree — a transport-agnostic core for adapters like Electron IPC and QStash",
   "keywords": [
     "arktype",
