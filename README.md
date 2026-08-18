@@ -1,5 +1,5 @@
 <p align="center">
-  <h1 align="center">🚌 <code>typeport</code></h1>
+  <h1 align="center">🚌 <code>typedport</code></h1>
   <p align="center">
     <strong>Type-safe RPC over any transport</strong>
   </p>
@@ -8,9 +8,7 @@
 > [!WARNING]
 > This library is a work in progress. The API is not stable yet.
 
-**typeport** turns a nested schema tree into a strongly-typed RPC client and a validating router, with the transport left to you. Define your contract once, and get a tRPC-style Proxy client on one side and a schema-enforcing dispatcher on the other — over Electron IPC, a message queue, a WebSocket, or an in-memory function call.
-
-It is the transport-agnostic core extracted from [`qstash-events`](https://github.com/adelrodriguez/qstash-events).
+**typedport** turns a nested schema tree into a strongly-typed RPC client and a validating router, with the transport left to you. Define your contract once, and get a tRPC-style Proxy client on one side and a schema-enforcing dispatcher on the other — over Electron IPC, a message queue, a WebSocket, or an in-memory function call.
 
 ## Features
 
@@ -20,12 +18,12 @@ It is the transport-agnostic core extracted from [`qstash-events`](https://githu
 - 🔐 **Validated at the boundary** — the router parses input against your schema before any resolver runs, and parses results against `output` on the way out so off-contract resolvers fail loudly
 - 🎯 **One primitive** — `event({ input, output })` is a round trip, `event(schema)` is one-way; every leaf is directly callable on the client
 - 🚚 **Bring your transport** — a transport is a single function `(path, payload, options?) => result`; `router.dispatch` is already one, real adapters are one-liners, and per-call options (an `AbortSignal`, a transfer list) flow through untouched via `$with` or positionally
-- 🧵 **`typeport/wire`** — optional subpath for real boundaries: a serializable error envelope, and `connect` to turn any duplex message pipe (MessagePort, worker, WebSocket) into a symmetric, timeout-guarded transport
+- 🧵 **`typedport/wire`** — optional subpath for real boundaries: a serializable error envelope, and `connect` to turn any duplex message pipe (MessagePort, worker, WebSocket) into a symmetric, timeout-guarded transport
 
 ## Installation
 
 ```bash
-pnpm add typeport
+pnpm add typedport
 ```
 
 Plus your schema library of choice (`zod`, `valibot`, `arktype`, ...). The examples below use Zod.
@@ -35,7 +33,7 @@ Plus your schema library of choice (`zod`, `valibot`, `arktype`, ...). The examp
 Define a contract:
 
 ```typescript
-import { defineContract, event } from "typeport"
+import { defineContract, event } from "typedport"
 import * as z from "zod"
 
 const LocalTextFile = z.object({ contents: z.string(), path: z.string() })
@@ -56,7 +54,7 @@ export const contract = defineContract({
 Implement it with a router (the trust boundary — input is parsed before your resolver runs). The resolver map is contextually typed from the contract: parameters are inferred, and missing or typo'd paths are compile errors — no annotations needed:
 
 ```typescript
-import { createRouter } from "typeport"
+import { createRouter } from "typedport"
 
 const router = createRouter(contract, {
   "localFiles.open": async () => openFile(),
@@ -89,7 +87,7 @@ With the default `Context = void`, the third argument disappears and `dispatch` 
 Call it with a client. A transport is one function; every leaf is directly callable:
 
 ```typescript
-import { createClient } from "typeport"
+import { createClient } from "typedport"
 
 const client = createClient(contract, (path, payload) => myWire.send(path, payload))
 
@@ -132,12 +130,12 @@ Per-call options shallow-merge over bound ones. When the transport declares no o
 
 Input is parsed twice by design. The client parses before sending so the caller gets an error with a stack trace at the call site. The router parses again before dispatching because the sender may not be your client at all — in transports like Electron IPC the receiving process must treat every message as untrusted. Only the router's parse is a security boundary.
 
-Results flow the other way with one parse: the router validates the resolver's return against `output` before it leaves the server, and the client returns the transport's value as-is. When the peer is a typeport router the result is schema-checked end to end; when it isn't (a plain HTTP endpoint, a mock), the client's return type is a promise, not a guarantee — validate at the edge if you don't trust the peer.
+Results flow the other way with one parse: the router validates the resolver's return against `output` before it leaves the server, and the client returns the transport's value as-is. When the peer is a typedport router the result is schema-checked end to end; when it isn't (a plain HTTP endpoint, a mock), the client's return type is a promise, not a guarantee — validate at the edge if you don't trust the peer.
 
 Every failure the library raises is a `TypeportError`, discriminated by `code` — `validation` (the caller's input failed, with the Standard Schema `issues`), `output-validation` (the resolver's result drifted off contract — the server's fault, not the caller's), `unknown-channel` (with the `path`), the `connect` lifecycle codes `timeout`, `closed`, and `no-router`, and `malformed-envelope` (`fromWire` got something that isn't an envelope). One `instanceof`, then `code` narrows the fields; anything that is _not_ a `TypeportError` came from application code:
 
 ```typescript
-import { TypeportError } from "typeport"
+import { TypeportError } from "typedport"
 
 try {
   await router.dispatch(path, raw)
@@ -151,21 +149,21 @@ try {
 
 Authenticity is the transport's job, not the core's: an HTTP adapter verifies signatures, an Electron adapter relies on process identity and a channel allowlist (`router.channels`). The core guarantees one thing everywhere: no resolver runs on unparsed input.
 
-## `typeport/wire`
+## `typedport/wire`
 
 Two problems every real boundary hits, solved once in an optional subpath export:
 
 **Errors don't survive serialization.** A thrown `TypeportError` gets flattened by `invoke`, structured clone, or JSON. `toWire`/`fromWire` are the codec: `toWire` captures any operation's outcome as a serializable value, `fromWire` unwraps it on the other side — returning the result or rethrowing, with `TypeportError` rehydrated (code and fields intact) so `instanceof` and `code` checks work across the boundary:
 
 ```typescript
-import { fromWire, toWire } from "typeport/wire"
+import { fromWire, toWire } from "typedport/wire"
 
 // server edge — never throws, always resolves a serializable WireResult
 ipcMain.handle(channel, (_event, payload) => toWire(router.dispatch(channel, payload)))
 
 // client edge — unwraps the result or rethrows, TypeportError intact
 const api = createClient(contract, async (path, payload) =>
-  fromWire(await window.typeport.send(path, payload))
+  fromWire(await window.typedport.send(path, payload))
 )
 ```
 
@@ -174,7 +172,7 @@ const api = createClient(contract, async (path, payload) =>
 **Message pipes have no request/response.** `postMessage`-shaped channels (MessagePorts, workers, WebSockets) need correlation ids, a pending map, timeouts, and teardown. `connect` owns all of that, over a minimal `Wire` — anything that can send a value and hand incoming values to a listener:
 
 ```typescript
-import { connect, type Wire } from "typeport/wire"
+import { connect, type Wire } from "typedport/wire"
 
 const { transport, close } = connect(wire, {
   router, // serve incoming requests from the peer; omit for a call-only end
@@ -192,7 +190,7 @@ A transport is one function, so the edges are almost embarrassing:
 ```typescript
 const memory = router.dispatch
 const electron = (path, input) => ipcRenderer.invoke(path, input)
-const qstash = async (path, body) => qstashClient.publishJSON({ url: `${baseUrl}/${path}`, body })
+const queue = async (path, body) => queueClient.publishJSON({ url: `${baseUrl}/${path}`, body })
 const port = connect(wrapDomPort(messagePort)).transport // request/response over postMessage, below
 ```
 
@@ -214,7 +212,7 @@ export const api = createClient(contract, async (path, payload) => (await ready)
 The server edge is a fetch handler (Hono, Next.js route handlers, Bun, and Deno all accept one). The wire envelope carries every outcome, so a `TypeportError` thrown by the router arrives in the browser with its `code` and fields intact:
 
 ```typescript
-import { toWire } from "typeport/wire"
+import { toWire } from "typedport/wire"
 
 const handle = async (request: Request): Promise<Response> => {
   const path = new URL(request.url).pathname.split("/").at(-1) ?? ""
@@ -249,8 +247,8 @@ const handle = async (request: Request): Promise<Response> => {
 The client transport is a `fetch` call:
 
 ```typescript
-import { createClient } from "typeport"
-import { fromWire } from "typeport/wire"
+import { createClient } from "typedport"
+import { fromWire } from "typedport/wire"
 
 const api = createClient(contract, async (path, payload) => {
   const response = await fetch(`${baseUrl}/${path}`, {
@@ -270,12 +268,12 @@ Auth, retries, and headers live in the transport function — the core never see
 <details>
 <summary><strong>Electron IPC</strong> — renderer client, main-process router</summary>
 
-A Proxy cannot cross `contextBridge` (it gets structured-cloned), so expose only the transport function from the preload and build the typeport client in the renderer.
+A Proxy cannot cross `contextBridge` (it gets structured-cloned), so expose only the transport function from the preload and build the typedport client in the renderer.
 
 ```typescript
 // main.ts — the router is the trust boundary for untrusted renderer input
 import { ipcMain } from "electron"
-import { createRouter } from "typeport"
+import { createRouter } from "typedport"
 import { contract } from "./contract"
 
 const router = createRouter(contract, {
@@ -291,20 +289,20 @@ for (const channel of router.channels) {
 // preload.ts — just the transport, nothing else
 import { contextBridge, ipcRenderer } from "electron"
 
-contextBridge.exposeInMainWorld("typeport", {
+contextBridge.exposeInMainWorld("typedport", {
   send: (path: string, payload: unknown) => ipcRenderer.invoke(path, payload),
 })
 ```
 
 ```typescript
 // renderer.ts
-import { createClient } from "typeport"
+import { createClient } from "typedport"
 import { contract } from "./contract"
 
-export const api = createClient(contract, (path, payload) => window.typeport.send(path, payload))
+export const api = createClient(contract, (path, payload) => window.typedport.send(path, payload))
 ```
 
-One-way leaves ride `invoke` too — the extra empty response is harmless and keeps the edge to a single function. Note that `ipcRenderer.invoke` re-throws only the error message string, so a `TypeportError` from the main process arrives in the renderer as a flat `Error`. If you need structured errors, wrap both edges in the `typeport/wire` envelope: `toWire(router.dispatch(channel, payload))` in the `handle` callback, `fromWire(await ...)` in the transport. If you load remote content, also check `event.senderFrame` before dispatching.
+One-way leaves ride `invoke` too — the extra empty response is harmless and keeps the edge to a single function. Note that `ipcRenderer.invoke` re-throws only the error message string, so a `TypeportError` from the main process arrives in the renderer as a flat `Error`. If you need structured errors, wrap both edges in the `typedport/wire` envelope: `toWire(router.dispatch(channel, payload))` in the `handle` callback, `fromWire(await ...)` in the transport. If you load remote content, also check `event.senderFrame` before dispatching.
 
 </details>
 
@@ -314,7 +312,7 @@ One-way leaves ride `invoke` too — the extra empty response is harmless and ke
 A port is duplex, so one `connect` per end gives you round trips in _both_ directions — each side serves its own contract and calls the other's. The only glue you write is adapting the port flavor to `Wire`:
 
 ```typescript
-import type { Wire } from "typeport/wire"
+import type { Wire } from "typedport/wire"
 
 // renderer / worker / iframe: DOM MessagePort
 export const wrapDomPort = (port: MessagePort): Wire => ({
@@ -339,8 +337,8 @@ Electron main creates the channel, keeps one end, and ships the other to the pag
 
 ```typescript
 import { BrowserWindow, MessageChannelMain } from "electron"
-import { createClient } from "typeport"
-import { connect } from "typeport/wire"
+import { createClient } from "typedport"
+import { connect } from "typedport/wire"
 
 function connectWindow(win: BrowserWindow) {
   const { port1, port2 } = new MessageChannelMain()
@@ -352,7 +350,7 @@ function connectWindow(win: BrowserWindow) {
   const push = createClient(pushContract, transport) // main → renderer, round trips included
 
   win.webContents.once("did-finish-load", () => {
-    win.webContents.postMessage("typeport:port", null, [port2])
+    win.webContents.postMessage("typedport:port", null, [port2])
   })
   win.on("closed", () => close(new Error("window closed")))
 
@@ -363,16 +361,16 @@ function connectWindow(win: BrowserWindow) {
 The preload is a relay (a port can't cross `contextBridge`, but `window.postMessage` can transfer it):
 
 ```typescript
-ipcRenderer.on("typeport:port", (event) => {
-  window.postMessage({ type: "typeport:port" }, "*", event.ports)
+ipcRenderer.on("typedport:port", (event) => {
+  window.postMessage({ type: "typedport:port" }, "*", event.ports)
 })
 ```
 
 The renderer is the mirror image, using a deferred transport so `api` is importable before the port arrives:
 
 ```typescript
-import { createClient, createRouter, type Transport } from "typeport"
-import { connect } from "typeport/wire"
+import { createClient, createRouter, type Transport } from "typedport"
+import { connect } from "typedport/wire"
 
 const pushRouter = createRouter(pushContract, {
   // ... resolvers for main → renderer calls
@@ -382,7 +380,7 @@ const ready = new Promise<Transport>((resolve) => {
   window.addEventListener(
     "message",
     (event) => {
-      if (event.source !== window || event.data?.type !== "typeport:port") return
+      if (event.source !== window || event.data?.type !== "typedport:port") return
       resolve(connect(wrapDomPort(event.ports[0]), { router: pushRouter }).transport)
     },
     { once: true }
@@ -393,49 +391,6 @@ export const api = createClient(contract, async (path, payload) => (await ready)
 ```
 
 Port messages buffer until the receiving end calls `start()`, and the deferred transport buffers calls until the port lands — no ready-handshake needed. A `TypeportError` thrown by either router arrives on the other side as a real `TypeportError` with its code and fields. The same wrappers work for Web Workers, iframes, and utility processes; only the port hand-off differs.
-
-</details>
-
-<details>
-<summary><strong>QStash</strong> — publish over HTTP, dispatch behind signature verification</summary>
-
-See [`qstash-events`](https://github.com/adelrodriguez/qstash-events) for the full package. QStash is one-way, so the contract it serves uses bare-schema leaves only. Publish options (delay, deduplication) live at the edge — bake them into the transport, per path if needed:
-
-```typescript
-import { Client, Receiver } from "@upstash/qstash"
-import { createClient, createRouter, TypeportError } from "typeport"
-
-const qstash = new Client({ token })
-
-const client = createClient(contract, (path, body) =>
-  qstash.publishJSON({ url: `${baseUrl}/${path}`, body })
-)
-
-// fetch-based receiver: verify the signature, then hand the untrusted pair to the router
-const handle = async (request: Request): Promise<Response> => {
-  const signature = request.headers.get("upstash-signature")
-  if (!signature) return new Response("Missing signature", { status: 400 })
-
-  const body = await request.text()
-  const isValid = await receiver.verify({ body, signature }).catch(() => false)
-  if (!isValid) return new Response("Invalid signature", { status: 403 })
-
-  const path = new URL(request.url).pathname.split("/").at(-1) ?? ""
-  if (!router.channels.includes(path)) {
-    return new Response(`Unknown message type: ${path}`, { status: 400 })
-  }
-
-  try {
-    await router.dispatch(path, JSON.parse(body))
-    return Response.json({ message: "Message processed successfully" })
-  } catch (error) {
-    if (error instanceof TypeportError && error.code === "validation") {
-      return new Response("Invalid message structure", { status: 400 })
-    }
-    throw error
-  }
-}
-```
 
 </details>
 

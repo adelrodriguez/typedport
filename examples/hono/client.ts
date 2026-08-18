@@ -34,7 +34,7 @@ const api = createClient(contract, async (path, payload, options?: CallOptions) 
   return fromWire(body)
 })
 
-const created = await api.todos.create({ title: "ship typeport" })
+const created = await api.todos.create({ title: "ship typedport" })
 console.log("created:", created)
 
 const toggled = await api.todos.toggle({ id: created.id })
