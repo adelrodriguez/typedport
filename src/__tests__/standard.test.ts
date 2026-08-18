@@ -77,7 +77,7 @@ describe("schema-library agnosticism", () => {
     "~standard": {
       validate: (value) =>
         typeof value === "string" ? { value } : { issues: [{ message: "expected a string" }] },
-      vendor: "conduit-test",
+      vendor: "typeport-test",
       version: 1,
     },
   }

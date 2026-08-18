@@ -1,9 +1,10 @@
 ---
-"@adelrodriguez/conduit": minor
+"typeport": minor
 ---
 
-Accept any Standard Schema, rename transport functions to `call`/`post`, add per-call options passthrough, surface post results
+Rename to `typeport`, accept any Standard Schema, rename transport functions to `call`/`post`, add per-call options passthrough, surface post results
 
+- The package is renamed from `@adelrodriguez/conduit` to `typeport` — typed trans**port**s, unscoped on npm.
 - Contract leaves now accept anything implementing [Standard Schema](https://standardschema.dev) (Zod, Valibot, ArkType, ...) instead of Zod only. `zod` is no longer a peer dependency.
 - Transport functions are renamed: `request` → `call` (procedures; a round trip resolving with the handler's result) and `send` → `post` (events; one-way).
 - Transports take an optional third `options` argument on `call` and `post`, forwarded verbatim from the call site: `client.foo.bar(input, options)` / `client.baz.publish(payload, options)`. The options type is inferred from the transport.

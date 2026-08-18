@@ -1,5 +1,5 @@
 <p align="center">
-  <h1 align="center">🔌 <code>conduit</code></h1>
+  <h1 align="center">🚌 <code>typeport</code></h1>
   <p align="center">
     <strong>Type-safe, Proxy-based RPC from a Standard Schema contract tree — transport-agnostic</strong>
   </p>
@@ -8,7 +8,7 @@
 > [!WARNING]
 > This library is a work in progress. The API is not stable yet.
 
-**conduit** turns a nested schema tree into a strongly-typed RPC client and a validating router, with the transport left to you. Define your contract once, and get a tRPC-style Proxy client on one side and a schema-enforcing dispatcher on the other — over Electron IPC, a message queue, a WebSocket, or an in-memory function call.
+**typeport** turns a nested schema tree into a strongly-typed RPC client and a validating router, with the transport left to you. Define your contract once, and get a tRPC-style Proxy client on one side and a schema-enforcing dispatcher on the other — over Electron IPC, a message queue, a WebSocket, or an in-memory function call.
 
 It is the transport-agnostic core extracted from [`qstash-events`](https://github.com/adelrodriguez/qstash-events).
 
@@ -24,7 +24,7 @@ It is the transport-agnostic core extracted from [`qstash-events`](https://githu
 ## Installation
 
 ```bash
-pnpm add @adelrodriguez/conduit
+pnpm add typeport
 ```
 
 Plus your schema library of choice (`zod`, `valibot`, `arktype`, ...). The examples below use Zod.
@@ -34,7 +34,7 @@ Plus your schema library of choice (`zod`, `valibot`, `arktype`, ...). The examp
 Define a contract:
 
 ```typescript
-import { defineContract, event, procedure } from "@adelrodriguez/conduit"
+import { defineContract, event, procedure } from "typeport"
 import * as z from "zod"
 
 const LocalTextFile = z.object({ contents: z.string(), path: z.string() })
@@ -55,7 +55,7 @@ export const contract = defineContract({
 Implement it with a router (the trust boundary — input is parsed before your handler runs). The handler map is contextually typed from the contract: parameters are inferred, and missing or typo'd paths are compile errors — no annotations needed:
 
 ```typescript
-import { createRouter } from "@adelrodriguez/conduit"
+import { createRouter } from "typeport"
 
 const router = createRouter(contract, {
   "localFiles.open": async () => openFile(),
@@ -72,7 +72,7 @@ await router.dispatch("localFiles.save", rawInput)
 Call it with a client (validates at the call site, then hands off to your transport):
 
 ```typescript
-import { createClient } from "@adelrodriguez/conduit"
+import { createClient } from "typeport"
 
 const client = createClient(contract, {
   call: (path, input) => myTransport.request(path, input),
@@ -90,7 +90,7 @@ client.localFiles.save.$schema // the input schema
 Wire client to router directly for tests — the whole stack with no I/O:
 
 ```typescript
-import { createMemoryTransport } from "@adelrodriguez/conduit"
+import { createMemoryTransport } from "typeport"
 
 const client = createClient(contract, createMemoryTransport(router))
 ```
@@ -100,7 +100,7 @@ const client = createClient(contract, createMemoryTransport(router))
 A transport can declare a per-call options type and a `post` result type; both flow through the client untouched:
 
 ```typescript
-import type { Transport } from "@adelrodriguez/conduit"
+import type { Transport } from "typeport"
 
 type PublishOptions = { delay?: number; deduplicationId?: string }
 
@@ -125,7 +125,7 @@ Input is parsed twice by design. The client parses before sending so the caller 
 Validation failures throw `ValidationError`, which carries the Standard Schema issues. Adapters use this to tell bad input (reject the message, keep serving) apart from handler failures (let them propagate):
 
 ```typescript
-import { ValidationError } from "@adelrodriguez/conduit"
+import { ValidationError } from "typeport"
 
 try {
   await router.dispatch(path, raw)
@@ -146,12 +146,12 @@ Adapters are deliberately small — small enough to paste. Each of these is the 
 <details>
 <summary><strong>Electron IPC</strong> — renderer client, main-process router</summary>
 
-A Proxy cannot cross `contextBridge` (it gets structured-cloned), so expose only the two transport functions from the preload and build the conduit client in the renderer.
+A Proxy cannot cross `contextBridge` (it gets structured-cloned), so expose only the two transport functions from the preload and build the typeport client in the renderer.
 
 ```typescript
 // main.ts — the router is the trust boundary for untrusted renderer input
 import { ipcMain } from "electron"
-import { createRouter, flatten } from "@adelrodriguez/conduit"
+import { createRouter, flatten } from "typeport"
 import { contract } from "./contract"
 
 const router = createRouter(contract, {
@@ -171,7 +171,7 @@ for (const [channel, leaf] of Object.entries(flatten(contract))) {
 // preload.ts — just the transport, nothing else
 import { contextBridge, ipcRenderer } from "electron"
 
-contextBridge.exposeInMainWorld("conduit", {
+contextBridge.exposeInMainWorld("typeport", {
   invoke: (path: string, input: unknown) => ipcRenderer.invoke(path, input),
   send: (path: string, payload: unknown) => ipcRenderer.send(path, payload),
 })
@@ -179,12 +179,12 @@ contextBridge.exposeInMainWorld("conduit", {
 
 ```typescript
 // renderer.ts
-import { createClient } from "@adelrodriguez/conduit"
+import { createClient } from "typeport"
 import { contract } from "./contract"
 
 export const api = createClient(contract, {
-  call: (path, input) => window.conduit.invoke(path, input),
-  post: async (path, payload) => window.conduit.send(path, payload),
+  call: (path, input) => window.typeport.invoke(path, input),
+  post: async (path, payload) => window.typeport.send(path, payload),
 })
 ```
 
@@ -199,7 +199,7 @@ Note that `ipcRenderer.invoke` re-throws only the error message string, so a `Va
 
 ```typescript
 // caller side
-import type { Transport } from "@adelrodriguez/conduit"
+import type { Transport } from "typeport"
 
 export function createPortTransport(port: MessagePort): Transport {
   let nextId = 0
@@ -227,7 +227,7 @@ export function createPortTransport(port: MessagePort): Transport {
 
 ```typescript
 // handler side
-import type { Router } from "@adelrodriguez/conduit"
+import type { Router } from "typeport"
 
 export function attachRouter(port: MessagePort, router: Router) {
   port.addEventListener("message", async ({ data }) => {
@@ -257,7 +257,7 @@ See [`qstash-events`](https://github.com/adelrodriguez/qstash-events) for the fu
 
 ```typescript
 import { Client, Receiver } from "@upstash/qstash"
-import { createClient, createRouter, ValidationError } from "@adelrodriguez/conduit"
+import { createClient, createRouter, ValidationError } from "typeport"
 
 const qstash = new Client({ token })
 
