@@ -1,20 +1,39 @@
 import { describe, expect, test } from "bun:test"
 import * as z from "zod"
-import { defineContract, event, procedure } from "../lib/contract"
+import { defineContract, event } from "../lib/contract"
 import { flatten } from "../lib/utils"
+
+describe("event", () => {
+  test("a bare schema builds a one-way leaf", () => {
+    const schema = z.object({ id: z.string() })
+    const leaf = event(schema)
+
+    expect(leaf.input).toBe(schema)
+    expect(leaf.output).toBeUndefined()
+  })
+
+  test("input and output build a round-trip leaf", () => {
+    const input = z.void()
+    const output = z.string()
+    const leaf = event({ input, output })
+
+    expect(leaf.input).toBe(input)
+    expect(leaf.output).toBe(output)
+  })
+})
 
 describe("defineContract", () => {
   test("returns the tree unchanged", () => {
     const tree = {
       localFiles: {
-        open: procedure({ input: z.void(), output: z.string() }),
+        open: event({ input: z.void(), output: z.string() }),
       },
     }
 
     expect(defineContract(tree)).toBe(tree)
   })
 
-  test.each(["$path", "$schema", "publish", "_kind"])("rejects reserved key %s", (key) => {
+  test.each(["$path", "$schema", "_kind"])("rejects reserved key %s", (key) => {
     expect(() =>
       defineContract({
         stripe: { [key]: event(z.object({ id: z.string() })) },
@@ -25,15 +44,23 @@ describe("defineContract", () => {
   test("rejects reserved keys used as branches", () => {
     expect(() =>
       defineContract({
-        publish: { created: event(z.object({ id: z.string() })) },
+        $helpers: { created: event(z.object({ id: z.string() })) },
       })
-    ).toThrow('Reserved key "publish"')
+    ).toThrow('Reserved key "$helpers"')
+  })
+
+  test("allows publish as an ordinary key", () => {
+    const tree = defineContract({
+      publish: { created: event(z.object({ id: z.string() })) },
+    })
+
+    expect(Object.keys(flatten(tree))).toEqual(["publish.created"])
   })
 })
 
 describe("flatten", () => {
   test("flattens nested leaves into dotted paths", () => {
-    const open = procedure({ input: z.void(), output: z.string() })
+    const open = event({ input: z.void(), output: z.string() })
     const created = event(z.object({ id: z.string() }))
 
     const result = flatten({

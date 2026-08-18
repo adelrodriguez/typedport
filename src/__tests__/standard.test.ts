@@ -3,61 +3,31 @@ import { describe, expect, test } from "bun:test"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import * as z from "zod"
 import { createClient } from "../lib/client"
-import { defineContract, event, procedure } from "../lib/contract"
-import { ValidationError } from "../lib/standard"
+import { defineContract, event } from "../lib/contract"
 import { createRouter } from "../lib/router"
+import { ValidationError } from "../lib/standard"
 
 const contract = defineContract({
-  greet: procedure({ input: z.object({ name: z.string() }), output: z.string() }),
+  greet: event({ input: z.object({ name: z.string() }), output: z.string() }),
   notify: event(z.object({ message: z.string() })),
-})
-
-describe("options passthrough", () => {
-  test("forwards per-call options to the transport", async () => {
-    const seen: unknown[] = []
-    const client = createClient(contract, {
-      call: (_path: string, _input: unknown, options?: { delay?: number }) => {
-        seen.push(options)
-        return Promise.resolve("hi")
-      },
-      post: (_path: string, _payload: unknown, options?: { delay?: number }) => {
-        seen.push(options)
-        return Promise.resolve()
-      },
-    })
-
-    await client.greet({ name: "Ada" }, { delay: 5 })
-    await client.notify.publish({ message: "hi" }, { delay: 10 })
-    await client.greet({ name: "Ada" })
-
-    expect(seen).toEqual([{ delay: 5 }, { delay: 10 }, undefined])
-  })
-
-  test("publish resolves with the transport's post result", async () => {
-    const client = createClient(contract, {
-      post: (path: string) => Promise.resolve({ messageId: `msg_${path}` }),
-    })
-
-    await expect(client.notify.publish({ message: "hi" })).resolves.toEqual({
-      messageId: "msg_notify",
-    })
-  })
 })
 
 describe("ValidationError", () => {
   test("client input failures carry Standard Schema issues", async () => {
-    const client = createClient(contract, { call: () => Promise.resolve("hi") })
+    const client = createClient(contract, () => "hi")
 
-    const error = await client.greet({ name: 1 as unknown as string }).catch((error: unknown) => error)
+    const error = await client
+      .greet({ name: 1 as unknown as string })
+      .catch((error: unknown) => error)
 
     expect(error).toBeInstanceOf(ValidationError)
     expect((error as ValidationError).issues.length).toBeGreaterThan(0)
   })
 
-  test("router distinguishes validation failures from handler failures", async () => {
+  test("router distinguishes validation failures from resolver failures", async () => {
     const router = createRouter(contract, {
       greet: () => {
-        throw new Error("handler exploded")
+        throw new Error("resolver exploded")
       },
       notify: () => null,
     })
@@ -84,7 +54,7 @@ describe("schema-library agnosticism", () => {
 
   test("any Standard Schema works as a contract leaf", async () => {
     const custom = defineContract({
-      shout: procedure({ input: stringSchema, output: stringSchema }),
+      shout: event({ input: stringSchema, output: stringSchema }),
     })
 
     const router = createRouter(custom, {

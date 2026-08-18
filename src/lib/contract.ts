@@ -1,61 +1,54 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
-export type ProcedureLeaf<
+export type Leaf<
   Input extends StandardSchemaV1 = StandardSchemaV1,
-  Output extends StandardSchemaV1 = StandardSchemaV1,
+  Output extends StandardSchemaV1 | undefined = StandardSchemaV1 | undefined,
 > = {
-  _kind: "procedure"
+  _kind: "event"
   input: Input
   output: Output
 }
-
-export type EventLeaf<Payload extends StandardSchemaV1 = StandardSchemaV1> = {
-  _kind: "event"
-  payload: Payload
-}
-
-export type Leaf = EventLeaf | ProcedureLeaf
 
 export type ContractTree = {
   [key: string]: ContractTree | Leaf
 }
 
 /**
- * A request/response operation. The client validates `input` before sending, the router validates
- * it again before dispatching, and the handler's return value is validated against `output`.
+ * A contract leaf. With `input` and `output` it is a round trip: the client validates `input`
+ * before sending, the router validates it again before dispatching, and the resolver's return
+ * value is validated against `output` on the way back. With a bare schema (`event(schema)`) it is
+ * one-way: the resolver's return value is discarded and the client types the call `Promise<void>`.
  * Schemas are anything implementing Standard Schema (Zod, Valibot, ArkType, ...).
  */
-export function procedure<Input extends StandardSchemaV1, Output extends StandardSchemaV1>(
-  definition: {
-    input: Input
-    output: Output
+export function event<Input extends StandardSchemaV1, Output extends StandardSchemaV1>(definition: {
+  input: Input
+  output: Output
+}): Leaf<Input, Output>
+export function event<Input extends StandardSchemaV1>(input: Input): Leaf<Input, undefined>
+export function event(
+  definition: StandardSchemaV1 | { input: StandardSchemaV1; output?: StandardSchemaV1 }
+): Leaf {
+  if ("~standard" in definition) {
+    return { _kind: "event", input: definition, output: undefined }
   }
-): ProcedureLeaf<Input, Output> {
-  return { _kind: "procedure", ...definition }
-}
 
-/**
- * A fire-and-forget message. The client validates `payload` before sending and the router validates
- * it again before dispatching.
- */
-export function event<Payload extends StandardSchemaV1>(payload: Payload): EventLeaf<Payload> {
-  return { _kind: "event", payload }
+  return { _kind: "event", input: definition.input, output: definition.output }
 }
 
 export function isLeaf(node: ContractTree | Leaf): node is Leaf {
   // Checking the discriminant's value (not just its presence) keeps a branch
   // that happens to contain a "_kind" key from masquerading as a leaf.
-  return "_kind" in node && (node._kind === "procedure" || node._kind === "event")
+  return "_kind" in node && node._kind === "event"
 }
 
 /**
  * Identity at the type level. At runtime it rejects keys the client proxy claims as syntax
- * (`$`-helpers, `publish`) and the leaf brand (`_kind`), so a contract cannot define a branch that
- * the proxy would silently shadow.
+ * (`$`-helpers) and the leaf brand (`_kind`), so a contract cannot define a branch that the proxy
+ * would silently shadow.
  */
 export function defineContract<Tree extends ContractTree>(tree: Tree): Tree {
   for (const [path, key] of walkKeys(tree)) {
-    if (key.startsWith("$") || key === "publish" || key === "_kind") {
+    if (key.startsWith("$") || key === "_kind") {
       throw new Error(`Reserved key "${key}" at "${path}" in contract`)
     }
   }

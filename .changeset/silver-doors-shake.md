@@ -2,12 +2,12 @@
 "typeport": minor
 ---
 
-Rename to `typeport`, accept any Standard Schema, rename transport functions to `call`/`post`, add per-call options passthrough, surface post results
+Rename to `typeport`, accept any Standard Schema, collapse to one leaf primitive and one transport function
 
 - The package is renamed from `@adelrodriguez/conduit` to `typeport` — typed trans**port**s, unscoped on npm.
 - Contract leaves now accept anything implementing [Standard Schema](https://standardschema.dev) (Zod, Valibot, ArkType, ...) instead of Zod only. `zod` is no longer a peer dependency.
-- Transport functions are renamed: `request` → `call` (procedures; a round trip resolving with the handler's result) and `send` → `post` (events; one-way).
-- Transports take an optional third `options` argument on `call` and `post`, forwarded verbatim from the call site: `client.foo.bar(input, options)` / `client.baz.publish(payload, options)`. The options type is inferred from the transport.
-- `publish` now resolves with whatever the transport's `post` returns (e.g. a QStash message id) instead of always `void`.
-- Validation failures throw the new exported `ValidationError`, which carries the Standard Schema issues, so adapters can distinguish bad input from handler failures.
-- Handlers may be synchronous, and event handlers may return a value (discarded by the router).
+- `procedure` and `event` collapse into a single `event` leaf: `event({ input, output })` is a round trip (result parsed against `output`), `event(schema)` is one-way (resolver result discarded, call typed `Promise<void>`).
+- Every leaf is directly callable on the client — `.publish()` is gone, and `publish` is no longer a reserved contract key.
+- A transport is now a single function `(path, payload) => result` instead of a `{ request, send }` pair. `router.dispatch` is itself a valid transport, so `createMemoryTransport` is gone: `createClient(contract, router.dispatch)`.
+- Validation failures throw the new exported `ValidationError`, which carries the Standard Schema issues, so adapters can distinguish bad input from resolver failures. The parse primitive itself is exported as `parseWith` for edge adapters that validate before their own publish paths.
+- The resolver map is typed by `InferResolvers` (replacing `InferHandlers`). Resolvers may be synchronous, and one-way resolvers may return a value (discarded by the router).

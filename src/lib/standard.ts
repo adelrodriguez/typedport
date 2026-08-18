@@ -15,6 +15,11 @@ export class ValidationError extends Error {
   }
 }
 
+/**
+ * Parses a value against any Standard Schema, throwing `ValidationError` on failure. This is the
+ * single parse primitive the client and router use; edge adapters can reuse it to validate before
+ * their own publish paths.
+ */
 export async function parseWith<Schema extends StandardSchemaV1>(
   schema: Schema,
   value: unknown

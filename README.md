@@ -17,9 +17,9 @@ It is the transport-agnostic core extracted from [`qstash-events`](https://githu
 - ✅ **Type-safe** — client inputs and outputs are inferred from your contract
 - 📐 **Any Standard Schema** — [Zod](https://zod.dev), [Valibot](https://valibot.dev), [ArkType](https://arktype.io), or anything else implementing [Standard Schema](https://standardschema.dev)
 - 🌲 **Nested contracts** — organize operations as a tree (`localFiles.open`); dotted paths are derived automatically
-- 🔐 **Validated at the boundary** — the router parses input against your schema before any handler runs, and parses procedure results on the way out so off-contract handlers fail loudly
-- 🔁 **Procedures and events** — request/response (`procedure`) and fire-and-forget (`event`) leaves in one contract
-- 🚚 **Bring your transport** — a transport is two functions (`call` for round trips, `post` for one-way); adapters stay ~50 lines. Per-call options (a QStash delay, an Electron transfer list) pass through untouched, and whatever `post` resolves with comes back from `publish`
+- 🔐 **Validated at the boundary** — the router parses input against your schema before any resolver runs, and parses results against `output` on the way out so off-contract resolvers fail loudly
+- 🎯 **One primitive** — `event({ input, output })` is a round trip, `event(schema)` is one-way; every leaf is directly callable on the client
+- 🚚 **Bring your transport** — a transport is a single function `(path, payload) => result`; `router.dispatch` is already one, and real adapters are one-liners
 
 ## Installation
 
@@ -34,15 +34,15 @@ Plus your schema library of choice (`zod`, `valibot`, `arktype`, ...). The examp
 Define a contract:
 
 ```typescript
-import { defineContract, event, procedure } from "typeport"
+import { defineContract, event } from "typeport"
 import * as z from "zod"
 
 const LocalTextFile = z.object({ contents: z.string(), path: z.string() })
 
 export const contract = defineContract({
   localFiles: {
-    open: procedure({ input: z.void(), output: LocalTextFile.nullable() }),
-    save: procedure({ input: LocalTextFile, output: z.void() }),
+    open: event({ input: z.void(), output: LocalTextFile.nullable() }),
+    save: event(LocalTextFile), // input only → one-way, resolves void
   },
   stripe: {
     checkout: {
@@ -52,7 +52,7 @@ export const contract = defineContract({
 })
 ```
 
-Implement it with a router (the trust boundary — input is parsed before your handler runs). The handler map is contextually typed from the contract: parameters are inferred, and missing or typo'd paths are compile errors — no annotations needed:
+Implement it with a router (the trust boundary — input is parsed before your resolver runs). The resolver map is contextually typed from the contract: parameters are inferred, and missing or typo'd paths are compile errors — no annotations needed:
 
 ```typescript
 import { createRouter } from "typeport"
@@ -67,62 +67,36 @@ const router = createRouter(contract, {
 await router.dispatch("localFiles.save", rawInput)
 ```
 
-`InferHandlers<typeof contract>` exists for when the handler map is defined away from the `createRouter` call (another file, built up incrementally) and needs a standalone type to check against.
+`InferResolvers<typeof contract>` exists for when the resolver map is defined away from the `createRouter` call (another file, built up incrementally) and needs a standalone type to check against.
 
-Call it with a client (validates at the call site, then hands off to your transport):
+Call it with a client. A transport is one function; every leaf is directly callable:
 
 ```typescript
 import { createClient } from "typeport"
 
-const client = createClient(contract, {
-  call: (path, input) => myTransport.request(path, input),
-  post: (path, payload) => myTransport.send(path, payload),
-})
+const client = createClient(contract, (path, payload) => myWire.send(path, payload))
 
-await client.localFiles.open()
+const file = await client.localFiles.open()
 await client.localFiles.save({ path: "/tmp/a.txt", contents: "hi" })
-await client.stripe.checkout.created.publish({ id: "evt_123" })
+await client.stripe.checkout.created({ id: "evt_123" })
 
 client.localFiles.save.$path // "localFiles.save"
 client.localFiles.save.$schema // the input schema
 ```
 
-Wire client to router directly for tests — the whole stack with no I/O:
+Leaves with an `output` schema resolve with the result; one-way leaves are typed `Promise<void>`. Input is validated at the call site before it reaches the transport, and the router validates again on arrival.
+
+`router.dispatch` is itself a valid transport, so wiring client to router directly — the whole stack with no I/O — is:
 
 ```typescript
-import { createMemoryTransport } from "typeport"
-
-const client = createClient(contract, createMemoryTransport(router))
-```
-
-### Per-call options and post results
-
-A transport can declare a per-call options type and a `post` result type; both flow through the client untouched:
-
-```typescript
-import type { Transport } from "typeport"
-
-type PublishOptions = { delay?: number; deduplicationId?: string }
-
-const transport = {
-  post: async (path: string, payload: unknown, options?: PublishOptions) =>
-    qstash.publishJSON({ ...options, url: `${baseUrl}/${path}`, body: payload }),
-} satisfies Transport<PublishOptions, { messageId: string }>
-
-const client = createClient(contract, transport)
-
-// options are typed, and publish resolves with the transport's result
-const { messageId } = await client.stripe.checkout.created.publish(
-  { id: "evt_123" },
-  { delay: 60 }
-)
+const client = createClient(contract, router.dispatch)
 ```
 
 ## Validation model
 
 Input is parsed twice by design. The client parses before sending so the caller gets an error with a stack trace at the call site. The router parses again before dispatching because the sender may not be your client at all — in transports like Electron IPC the receiving process must treat every message as untrusted. Only the router's parse is a security boundary.
 
-Validation failures throw `ValidationError`, which carries the Standard Schema issues. Adapters use this to tell bad input (reject the message, keep serving) apart from handler failures (let them propagate):
+Validation failures throw `ValidationError`, which carries the Standard Schema issues. Adapters use this to tell bad input (reject the message, keep serving) apart from resolver failures (let them propagate):
 
 ```typescript
 import { ValidationError } from "typeport"
@@ -137,33 +111,38 @@ try {
 }
 ```
 
-Authenticity is the transport's job, not the core's: an HTTP adapter verifies signatures, an Electron adapter relies on process identity and a channel allowlist (`router.channels`). The core guarantees one thing everywhere: no handler runs on unparsed input.
+Authenticity is the transport's job, not the core's: an HTTP adapter verifies signatures, an Electron adapter relies on process identity and a channel allowlist (`router.channels`). The core guarantees one thing everywhere: no resolver runs on unparsed input.
 
 ## Recipes
 
-Adapters are deliberately small — small enough to paste. Each of these is the entire integration.
+A transport is one function, so the edges are almost embarrassing:
+
+```typescript
+const memory = router.dispatch
+const electron = (path, input) => ipcRenderer.invoke(path, input)
+const qstash = async (path, body) => qstashClient.publishJSON({ url: `${baseUrl}/${path}`, body })
+const port = createPortTransport(port) // request/response over postMessage, below
+```
+
+One thing to keep straight: a one-way transport (a queue) paired with a leaf that declares an `output` is a contract error the core cannot catch — the client would resolve the publish receipt as if it were the result. Keep `output` off the leaves a one-way transport serves.
 
 <details>
 <summary><strong>Electron IPC</strong> — renderer client, main-process router</summary>
 
-A Proxy cannot cross `contextBridge` (it gets structured-cloned), so expose only the two transport functions from the preload and build the typeport client in the renderer.
+A Proxy cannot cross `contextBridge` (it gets structured-cloned), so expose only the transport function from the preload and build the typeport client in the renderer.
 
 ```typescript
 // main.ts — the router is the trust boundary for untrusted renderer input
 import { ipcMain } from "electron"
-import { createRouter, flatten } from "typeport"
+import { createRouter } from "typeport"
 import { contract } from "./contract"
 
 const router = createRouter(contract, {
   // ...
 })
 
-for (const [channel, leaf] of Object.entries(flatten(contract))) {
-  if (leaf._kind === "procedure") {
-    ipcMain.handle(channel, (_event, input) => router.dispatch(channel, input))
-  } else {
-    ipcMain.on(channel, (_event, payload) => void router.dispatch(channel, payload))
-  }
+for (const channel of router.channels) {
+  ipcMain.handle(channel, (_event, payload) => router.dispatch(channel, payload))
 }
 ```
 
@@ -172,8 +151,7 @@ for (const [channel, leaf] of Object.entries(flatten(contract))) {
 import { contextBridge, ipcRenderer } from "electron"
 
 contextBridge.exposeInMainWorld("typeport", {
-  invoke: (path: string, input: unknown) => ipcRenderer.invoke(path, input),
-  send: (path: string, payload: unknown) => ipcRenderer.send(path, payload),
+  send: (path: string, payload: unknown) => ipcRenderer.invoke(path, payload),
 })
 ```
 
@@ -182,13 +160,10 @@ contextBridge.exposeInMainWorld("typeport", {
 import { createClient } from "typeport"
 import { contract } from "./contract"
 
-export const api = createClient(contract, {
-  call: (path, input) => window.typeport.invoke(path, input),
-  post: async (path, payload) => window.typeport.send(path, payload),
-})
+export const api = createClient(contract, (path, payload) => window.typeport.send(path, payload))
 ```
 
-Note that `ipcRenderer.invoke` re-throws only the error message string, so a `ValidationError` from the main process arrives in the renderer as a flat `Error`. If you need structured errors, encode `{ ok, error }` in the resolved value instead (like the MessagePort recipe below). If you load remote content, also check `event.senderFrame` before dispatching.
+One-way leaves ride `invoke` too — the extra empty response is harmless and keeps the edge to a single function. Note that `ipcRenderer.invoke` re-throws only the error message string, so a `ValidationError` from the main process arrives in the renderer as a flat `Error`. If you need structured errors, encode `{ ok, error }` in the resolved value instead (like the MessagePort recipe below). If you load remote content, also check `event.senderFrame` before dispatching.
 
 </details>
 
@@ -206,22 +181,19 @@ export function createPortTransport(port: MessagePort): Transport {
   const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
 
   port.addEventListener("message", ({ data }) => {
-    const entry = data.kind === "response" ? pending.get(data.id) : undefined
+    const entry = pending.get(data.id)
     if (!entry) return
     pending.delete(data.id)
     data.ok ? entry.resolve(data.result) : entry.reject(new Error(data.error))
   })
   port.start()
 
-  return {
-    call: (path, input) =>
-      new Promise((resolve, reject) => {
-        const id = nextId++
-        pending.set(id, { resolve, reject })
-        port.postMessage({ kind: "call", id, path, input })
-      }),
-    post: async (path, payload) => port.postMessage({ kind: "event", path, payload }),
-  }
+  return (path, payload) =>
+    new Promise((resolve, reject) => {
+      const id = nextId++
+      pending.set(id, { resolve, reject })
+      port.postMessage({ id, path, payload })
+    })
 }
 ```
 
@@ -231,15 +203,11 @@ import type { Router } from "typeport"
 
 export function attachRouter(port: MessagePort, router: Router) {
   port.addEventListener("message", async ({ data }) => {
-    if (data.kind === "call") {
-      try {
-        const result = await router.dispatch(data.path, data.input)
-        port.postMessage({ kind: "response", id: data.id, ok: true, result })
-      } catch (error) {
-        port.postMessage({ kind: "response", id: data.id, ok: false, error: String(error) })
-      }
-    } else if (data.kind === "event") {
-      void router.dispatch(data.path, data.payload)
+    try {
+      const result = await router.dispatch(data.path, data.payload)
+      port.postMessage({ id: data.id, ok: true, result })
+    } catch (error) {
+      port.postMessage({ id: data.id, ok: false, error: String(error) })
     }
   })
   port.start()
@@ -253,7 +221,7 @@ If the other end can die (a crashed utility process), add a timeout around `pend
 <details>
 <summary><strong>QStash</strong> — publish over HTTP, dispatch behind signature verification</summary>
 
-See [`qstash-events`](https://github.com/adelrodriguez/qstash-events) for the full package. The core of it:
+See [`qstash-events`](https://github.com/adelrodriguez/qstash-events) for the full package. QStash is one-way, so the contract it serves uses bare-schema leaves only. Publish options (delay, deduplication) live at the edge — bake them into the transport, per path if needed:
 
 ```typescript
 import { Client, Receiver } from "@upstash/qstash"
@@ -261,10 +229,9 @@ import { createClient, createRouter, ValidationError } from "typeport"
 
 const qstash = new Client({ token })
 
-const client = createClient(contract, {
-  post: (path, payload, options?: { delay?: number; deduplicationId?: string }) =>
-    qstash.publishJSON({ ...options, url: `${baseUrl}/${path}`, body: payload }),
-})
+const client = createClient(contract, (path, body) =>
+  qstash.publishJSON({ url: `${baseUrl}/${path}`, body })
+)
 
 // fetch-based receiver: verify the signature, then hand the untrusted pair to the router
 const handle = async (request: Request): Promise<Response> => {
