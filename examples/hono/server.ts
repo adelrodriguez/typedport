@@ -38,12 +38,18 @@ const app = new Hono()
 // Edge concerns (auth, logging, rate limits) go here as ordinary middleware:
 // app.use("/rpc/*", authMiddleware)
 
+// Every response this route family produces — success or failure, any door —
+// is a WireResult envelope, so the client's unconditional fromWire always has
+// something it can read.
+const fail = (c: Context, message: string, status: 400 | 404 | 405) =>
+  c.json({ error: { message, name: "Error" }, ok: false } satisfies WireResult, status)
+
 // JSON has no undefined, so the client sends null for void inputs; map it
 // back so z.void() leaves round-trip. The router neither knows nor cares
 // which HTTP door a call came through.
 const respond = async (c: Context, path: string, input: unknown) => {
   if (!router.channels.includes(path)) {
-    return c.text("Unknown channel", 404)
+    return fail(c, `Unknown channel: "${path}"`, 404)
   }
 
   const wire = await toWire(router.dispatch(path, input ?? undefined))
@@ -66,11 +72,19 @@ app.post("/rpc/:path", async (c) =>
 // including mutations, must knock on POST.
 const reads = new Set<string>(["todos.list"])
 
+// The allowlist is hand-written, so guard it at startup: a renamed channel
+// should crash the boot, not silently turn a read into a 405.
+for (const path of reads) {
+  if (!router.channels.includes(path)) {
+    throw new Error(`reads allowlist references unknown channel "${path}"`)
+  }
+}
+
 app.get("/rpc/:path", async (c) => {
   const path = c.req.param("path")
 
   if (!reads.has(path)) {
-    return c.text("Not a query; use POST", 405)
+    return fail(c, `"${path}" is not a query; use POST`, 405)
   }
 
   let input: unknown
@@ -78,12 +92,7 @@ app.get("/rpc/:path", async (c) => {
   try {
     input = JSON.parse(c.req.query("input") ?? "null")
   } catch {
-    // Keep the failure in the same envelope shape the client's fromWire reads.
-    const wire = {
-      error: { message: "Malformed input query parameter", name: "Error" },
-      ok: false,
-    } satisfies WireResult
-    return c.json(wire, 400)
+    return fail(c, "Malformed input query parameter", 400)
   }
 
   return respond(c, path, input)
