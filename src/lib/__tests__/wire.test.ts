@@ -83,10 +83,10 @@ describe("connect", () => {
     // Thrown by the remote router, yet instanceof and code checks work on this side.
     expect(error).toBeInstanceOf(TypeportError)
 
-    const typeportError = error as Extract<TypeportError, { code: "validation" }>
+    const typedportError = error as Extract<TypeportError, { code: "validation" }>
 
-    expect(typeportError.code).toBe("validation")
-    expect(typeportError.issues.length).toBeGreaterThan(0)
+    expect(typedportError.code).toBe("validation")
+    expect(typedportError.issues.length).toBeGreaterThan(0)
   })
 
   test("carries resolver crashes as plain errors", async () => {
@@ -133,11 +133,11 @@ describe("connect", () => {
 
     expect(error).toBeInstanceOf(TypeportError)
 
-    const typeportError = error as Extract<TypeportError, { code: "timeout" }>
+    const typedportError = error as Extract<TypeportError, { code: "timeout" }>
 
-    expect(typeportError.code).toBe("timeout")
-    expect(typeportError.path).toBe("math.add")
-    expect(typeportError.timeoutMs).toBe(20)
+    expect(typedportError.code).toBe("timeout")
+    expect(typedportError.path).toBe("math.add")
+    expect(typedportError.timeoutMs).toBe(20)
   })
 
   test("passes per-connection context to the served router", async () => {

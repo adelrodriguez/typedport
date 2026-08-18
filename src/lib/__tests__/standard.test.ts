@@ -21,10 +21,10 @@ describe("TypeportError", () => {
 
     expect(error).toBeInstanceOf(TypeportError)
 
-    const typeportError = error as Extract<TypeportError, { code: "validation" }>
+    const typedportError = error as Extract<TypeportError, { code: "validation" }>
 
-    expect(typeportError.code).toBe("validation")
-    expect(typeportError.issues.length).toBeGreaterThan(0)
+    expect(typedportError.code).toBe("validation")
+    expect(typedportError.issues.length).toBeGreaterThan(0)
   })
 
   test("router distinguishes library failures from resolver failures", async () => {
@@ -54,7 +54,7 @@ describe("schema-library agnosticism", () => {
     "~standard": {
       validate: (value) =>
         typeof value === "string" ? { value } : { issues: [{ message: "expected a string" }] },
-      vendor: "typeport-test",
+      vendor: "typedport-test",
       version: 1,
     },
   }

@@ -93,7 +93,7 @@ type PendingEntry = {
 }
 
 /**
- * Wires one end of a duplex pipe into typeport: serves incoming requests through `router` (omit it
+ * Wires one end of a duplex pipe into typedport: serves incoming requests through `router` (omit it
  * for a call-only end) and returns a `Transport` for calling the peer, with request/response
  * correlation handled internally. Fully symmetric — call it on both ends with the roles swapped.
  *

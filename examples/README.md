@@ -1,7 +1,7 @@
 # Examples
 
-Runnable demos of typeport over real transports. Each example imports from `../../src` so it runs
-against the working tree; in your own app the imports become `"typeport"` and `"typeport/wire"`.
+Runnable demos of typedport over real transports. Each example imports from `../../src` so it runs
+against the working tree; in your own app the imports become `"typedport"` and `"typedport/wire"`.
 
 Run them with [`tsx`](https://tsx.is) (a dev dependency of this repo).
 

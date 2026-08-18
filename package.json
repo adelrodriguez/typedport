@@ -1,7 +1,7 @@
 {
-  "name": "typeport",
+  "name": "typedport",
   "version": "0.1.0",
-  "description": "Type-safe, Proxy-based RPC from a Standard Schema contract tree — a transport-agnostic core for adapters like Electron IPC and QStash",
+  "description": "Type-safe, Proxy-based RPC from a Standard Schema contract tree — a transport-agnostic core for adapters like Electron IPC, WebSockets, and message queues",
   "keywords": [
     "arktype",
     "contract",
@@ -15,15 +15,15 @@
     "valibot",
     "zod"
   ],
-  "homepage": "https://github.com/adelrodriguez/typeport#readme",
+  "homepage": "https://github.com/adelrodriguez/typedport#readme",
   "bugs": {
-    "url": "https://github.com/adelrodriguez/typeport/issues"
+    "url": "https://github.com/adelrodriguez/typedport/issues"
   },
   "license": "MIT",
   "author": "Adel Rodriguez",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/adelrodriguez/typeport.git"
+    "url": "git+https://github.com/adelrodriguez/typedport.git"
   },
   "files": [
     "dist"

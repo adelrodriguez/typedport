@@ -1,12 +1,12 @@
-# typeport
+# typedport
 
 ## 0.1.0
 
 ### Minor Changes
 
-- 2daa3ac: Rename to `typeport`, accept any Standard Schema, collapse to one leaf primitive and one transport function
+- 2daa3ac: Rename to `typedport`, accept any Standard Schema, collapse to one leaf primitive and one transport function
 
-  - The package is renamed from `@adelrodriguez/conduit` to `typeport` — typed trans**port**s, unscoped on npm.
+  - The package is renamed from `@adelrodriguez/conduit` to `typedport` — typed trans**port**s, unscoped on npm.
   - Contract leaves now accept anything implementing [Standard Schema](https://standardschema.dev) (Zod, Valibot, ArkType, ...) instead of Zod only. `zod` is no longer a peer dependency.
   - `procedure` and `event` collapse into a single `event` leaf: `event({ input, output })` is a round trip (result parsed against `output`), `event(schema)` is one-way (resolver result discarded, call typed `Promise<void>`).
   - Every leaf is directly callable on the client — `.publish()` is gone, and `publish` is no longer a reserved contract key. `defineContract` rejects keys containing a dot, which would silently collide with the equivalent nested path.
@@ -16,5 +16,5 @@
   - Resolvers receive a per-dispatch **context**: `createRouter<typeof contract, Session>(contract, resolvers)` types every resolver `(input, context)`, and the edge supplies it via `dispatch(path, raw, context)`. With the default `void` context the argument disappears and `dispatch` remains a valid two-argument transport. `connect` accepts a per-connection `context` option.
   - The client's `$schema` helper splits into `$input` and `$output`: `$input` is always the input schema (for a bare-schema leaf, the schema itself), `$output` is the output schema or `undefined` on one-way leaves.
   - Transports may declare a per-call `options` parameter (`Transport<Options>`, inferred from the transport function's annotation). Every leaf call accepts `(input, options?)`, and `$with(options)` on the root or any subtree returns the client with options bound (per-call shallow-merging over bound) — `api.$with({ method: "GET" }).todos.list()`, `api.$with({ signal }).files.open()`. With no options declared, the surface disappears.
-  - New `typeport/wire` subpath export: `toWire`/`fromWire` are a symmetric codec for outcomes — `toWire(promiseOrThunk)` captures any operation's result or failure as a serializable envelope, `fromWire` takes `unknown`, validates the envelope shape (a proxy error page raises a clear error instead of an opaque `TypeError`), and unwraps it or rethrows (`TypeportError` crosses boundaries with its code and fields intact) — and `connect(wire, { router?, timeoutMs? })` turns any duplex message pipe into a symmetric transport with request/response correlation, per-call timeouts, and `close` teardown.
+  - New `typedport/wire` subpath export: `toWire`/`fromWire` are a symmetric codec for outcomes — `toWire(promiseOrThunk)` captures any operation's result or failure as a serializable envelope, `fromWire` takes `unknown`, validates the envelope shape (a proxy error page raises a clear error instead of an opaque `TypeError`), and unwraps it or rethrows (`TypeportError` crosses boundaries with its code and fields intact) — and `connect(wire, { router?, timeoutMs? })` turns any duplex message pipe into a symmetric transport with request/response correlation, per-call timeouts, and `close` teardown.
   - New `OneWayContract` type: adapters built on one-way delivery (queues, `webContents.send`) constrain their contract parameter to it, making a round-trip leaf a compile error.
