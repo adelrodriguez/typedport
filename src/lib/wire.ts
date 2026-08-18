@@ -100,6 +100,12 @@ type PendingEntry = {
  * A pipe is one peer, so `context` is per-connection: whatever identity the edge established (the
  * session, the window) is passed to every dispatch this end serves.
  *
+ * Full error fidelity is the point of the protocol: the peer receives every `TypeportError` detail,
+ * including server-fault codes like `output-validation`. That makes `connect` a trusted-peer
+ * transport (a worker, a MessagePort, your own processes). A peer that should not see server-side
+ * detail — a browser talking to a public server — belongs behind an edge that redacts, like the
+ * HTTP recipes do.
+ *
  * `timeoutMs` bounds each outgoing call; without it a dead peer leaves calls pending forever.
  * `close(reason?)` rejects everything in flight and every future call with a `TypeportError` (code
  * `closed`, the reason in `cause`) and stops serving — wire it to whatever liveness signal the pipe

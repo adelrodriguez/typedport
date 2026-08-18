@@ -183,7 +183,7 @@ const { transport, close } = connect(wire, {
 })
 ```
 
-`connect` is symmetric: call it on both ends of a duplex pipe, each with its own router, and each side gets a transport for calling the other. It speaks the envelope internally, so error fidelity comes for free. `close(reason?)` rejects everything in flight and future calls — wire it to whatever liveness signal the pipe has (a window's `closed`, a socket's `close`).
+`connect` is symmetric: call it on both ends of a duplex pipe, each with its own router, and each side gets a transport for calling the other. It speaks the envelope internally, so error fidelity comes for free — which also makes it a **trusted-peer** transport: the peer sees every `TypeportError` detail, including server-fault codes like `output-validation`. An untrusted peer (a browser talking to a public server) belongs behind an edge that redacts, like the HTTP recipe. `close(reason?)` rejects everything in flight and future calls — wire it to whatever liveness signal the pipe has (a window's `closed`, a socket's `close`).
 
 ## Recipes
 
