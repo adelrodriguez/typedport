@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest"
 import * as z from "zod"
-import { defineContract, event } from "../lib/contract"
-import { createRouter } from "../lib/router"
+import { defineContract, event } from "../contract"
+import { createRouter } from "../router"
 
 const contract = defineContract({
   math: {

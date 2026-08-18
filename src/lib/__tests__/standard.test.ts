@@ -1,10 +1,10 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import { describe, expect, test } from "vitest"
 import * as z from "zod"
-import { createClient } from "../lib/client"
-import { defineContract, event } from "../lib/contract"
-import { TypeportError } from "../lib/error"
-import { createRouter } from "../lib/router"
+import { createClient } from "../client"
+import { defineContract, event } from "../contract"
+import { TypeportError } from "../error"
+import { createRouter } from "../router"
 
 const contract = defineContract({
   greet: event({ input: z.object({ name: z.string() }), output: z.string() }),

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest"
 import * as z from "zod"
-import { defineContract, event } from "../lib/contract"
-import { flatten } from "../lib/utils"
+import { defineContract, event } from "../contract"
+import { flatten } from "../utils"
 
 describe("event", () => {
   test("a bare schema builds a one-way leaf", () => {

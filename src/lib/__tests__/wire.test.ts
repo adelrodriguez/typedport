@@ -1,10 +1,10 @@
 import { describe, expect, test } from "vitest"
 import * as z from "zod"
-import { createClient } from "../lib/client"
-import { defineContract, event } from "../lib/contract"
-import { TypeportError } from "../lib/error"
-import { createRouter } from "../lib/router"
-import { connect, fromWire, toWire, type Wire } from "../lib/wire"
+import { createClient } from "../client"
+import { defineContract, event } from "../contract"
+import { TypeportError } from "../error"
+import { createRouter } from "../router"
+import { connect, fromWire, toWire, type Wire } from "../wire"
 
 // An in-memory duplex pipe. Cloning every message (as postMessage would)
 // asserts the protocol survives serializing boundaries, not shared references.

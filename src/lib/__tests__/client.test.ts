@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest"
 import * as z from "zod"
-import { createClient } from "../lib/client"
-import { defineContract, event } from "../lib/contract"
-import { createRouter } from "../lib/router"
+import { createClient } from "../client"
+import { defineContract, event } from "../contract"
+import { createRouter } from "../router"
 
 const LocalTextFile = z.object({ contents: z.string(), path: z.string() })
 
