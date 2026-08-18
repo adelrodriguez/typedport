@@ -138,7 +138,7 @@ const api = createClient(contract, async (path, payload) =>
 import { connect, type Wire } from "typeport/wire"
 
 const { transport, close } = connect(wire, {
-  router,          // serve incoming requests from the peer; omit for a call-only end
+  router, // serve incoming requests from the peer; omit for a call-only end
   timeoutMs: 5000, // reject a pending call if no response arrives
 })
 ```
@@ -167,6 +167,50 @@ const ready = new Promise<Transport>((resolve) => {
 
 export const api = createClient(contract, async (path, payload) => (await ready)(path, payload))
 ```
+
+<details>
+<summary><strong>HTTP / fetch</strong> — any framework that speaks Request/Response</summary>
+
+The server edge is a fetch handler (Hono, Next.js route handlers, Bun, and Deno all accept one). The wire envelope carries every outcome, so a `ValidationError` thrown by the router arrives in the browser as a real `ValidationError`:
+
+```typescript
+import { dispatchToWire } from "typeport/wire"
+
+const handle = async (request: Request): Promise<Response> => {
+  const path = new URL(request.url).pathname.split("/").at(-1) ?? ""
+
+  if (!router.channels.includes(path)) {
+    return new Response("Unknown channel", { status: 404 })
+  }
+
+  const wire = await dispatchToWire(router, path, await request.json())
+
+  return Response.json(wire, {
+    status: wire.ok ? 200 : wire.error.issues ? 400 : 500,
+  })
+}
+```
+
+The client transport is a `fetch` call:
+
+```typescript
+import { createClient } from "typeport"
+import { fromWire } from "typeport/wire"
+
+const api = createClient(contract, async (path, payload) => {
+  const response = await fetch(`${baseUrl}/${path}`, {
+    body: JSON.stringify(payload ?? null),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  })
+
+  return fromWire(await response.json())
+})
+```
+
+Auth, retries, and headers live in the transport function — the core never sees them. The status codes are a courtesy for logs and middleware; `fromWire` decides success from the envelope, not the status.
+
+</details>
 
 <details>
 <summary><strong>Electron IPC</strong> — renderer client, main-process router</summary>
@@ -212,7 +256,7 @@ One-way leaves ride `invoke` too — the extra empty response is harmless and ke
 <details>
 <summary><strong>MessagePort / postMessage</strong> — bidirectional: workers, iframes, <code>MessageChannelMain</code></summary>
 
-A port is duplex, so one `connect` per end gives you round trips in *both* directions — each side serves its own contract and calls the other's. The only glue you write is adapting the port flavor to `Wire`:
+A port is duplex, so one `connect` per end gives you round trips in _both_ directions — each side serves its own contract and calls the other's. The only glue you write is adapting the port flavor to `Wire`:
 
 ```typescript
 import type { Wire } from "typeport/wire"
@@ -248,7 +292,7 @@ function connectWindow(win: BrowserWindow) {
 
   const { transport, close } = connect(wrapPortMain(port1), {
     router: mainRouter, // serves the renderer → main contract
-    timeoutMs: 5_000,   // a dead renderer rejects pending calls instead of hanging them
+    timeoutMs: 5_000, // a dead renderer rejects pending calls instead of hanging them
   })
   const push = createClient(pushContract, transport) // main → renderer, round trips included
 
@@ -280,10 +324,14 @@ const pushRouter = createRouter(pushContract, {
 })
 
 const ready = new Promise<Transport>((resolve) => {
-  window.addEventListener("message", (event) => {
-    if (event.source !== window || event.data?.type !== "typeport:port") return
-    resolve(connect(wrapDomPort(event.ports[0]), { router: pushRouter }).transport)
-  }, { once: true })
+  window.addEventListener(
+    "message",
+    (event) => {
+      if (event.source !== window || event.data?.type !== "typeport:port") return
+      resolve(connect(wrapDomPort(event.ports[0]), { router: pushRouter }).transport)
+    },
+    { once: true }
+  )
 })
 
 export const api = createClient(contract, async (path, payload) => (await ready)(path, payload))

@@ -1,7 +1,7 @@
 import type { ContractTree, Leaf } from "./contract"
+import type { InferClient, Transport } from "./types"
 import { createRecursiveProxy } from "./proxy"
 import { parseWith } from "./standard"
-import type { InferClient, Transport } from "./types"
 import { flatten } from "./utils"
 
 /**

@@ -12,5 +12,5 @@
     "verbatimModuleSyntax": true
   },
   "exclude": ["node_modules", "dist", ".packref"],
-  "include": ["src", "*.config.ts"]
+  "include": ["src", "examples", "*.config.ts"]
 }

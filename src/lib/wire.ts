@@ -1,7 +1,7 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { Router } from "./router"
-import { ValidationError } from "./standard"
 import type { Transport } from "./types"
+import { ValidationError } from "./standard"
 
 /**
  * A dispatch outcome flattened to a serializable value, so errors survive boundaries that

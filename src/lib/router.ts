@@ -1,6 +1,6 @@
 import type { ContractTree } from "./contract"
-import { parseWith } from "./standard"
 import type { InferResolvers } from "./types"
+import { parseWith } from "./standard"
 import { flatten } from "./utils"
 
 export type Router = {

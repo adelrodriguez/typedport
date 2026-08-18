@@ -12,9 +12,9 @@ type MaybePromise<T> = Promise<T> | T
 /**
  * The single function a transport supplies: deliver a validated payload to a dotted path and
  * resolve with whatever came back. That's the whole edge contract — `router.dispatch` is already
- * one, `(path, input) => ipcRenderer.invoke(path, input)` is another. One-way transports (a
- * message queue) just resolve with nothing useful; pair them with contracts whose leaves declare
- * no `output`.
+ * one, `(path, input) => ipcRenderer.invoke(path, input)` is another. One-way transports (a message
+ * queue) just resolve with nothing useful; pair them with contracts whose leaves declare no
+ * `output`.
  */
 export type Transport = (path: string, payload: unknown) => MaybePromise<unknown>
 
