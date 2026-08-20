@@ -1,6 +1,6 @@
 import type { ContractTree } from "./contract"
 import type { InferResolvers } from "./types"
-import { TypeportError } from "./error"
+import { ChannelError } from "./error"
 import { parseWith } from "./standard"
 import { flatten } from "./utils"
 
@@ -15,7 +15,7 @@ export type Router<Context = void> = {
    * Validates and dispatches an incoming call. `path` and `raw` are untrusted: an unknown path
    * throws, input is parsed against the leaf's schema before the resolver runs, and when the leaf
    * declares an `output` the result is parsed against it so an off-contract resolver fails loudly
-   * (one-way results are discarded). Library failures throw `TypeportError` — `validation` for the
+   * (one-way results are discarded). Library failures throw `ChannelError` — `validation` for the
    * caller's input, `output-validation` for a resolver result that drifted off contract,
    * `unknown-channel` for a path outside it; anything else escaping `dispatch` came from the
    * resolver.
@@ -49,7 +49,7 @@ export function createRouter<Tree extends ContractTree, Context = void>(
     const resolver = resolverMap[path]
 
     if (!(leaf && resolver)) {
-      throw new TypeportError({ code: "unknown-channel", path })
+      throw new ChannelError({ code: "unknown-channel", path })
     }
 
     const result = await resolver(await parseWith(leaf.input, raw), context)
@@ -63,8 +63,8 @@ export function createRouter<Tree extends ContractTree, Context = void>(
     } catch (error) {
       // An off-contract resolver result is the server's fault, not the
       // caller's — recode it so edges can tell the two apart.
-      if (error instanceof TypeportError && error.code === "validation") {
-        throw new TypeportError(
+      if (error instanceof ChannelError && error.code === "validation") {
+        throw new ChannelError(
           { code: "output-validation", issues: error.issues },
           { cause: error }
         )

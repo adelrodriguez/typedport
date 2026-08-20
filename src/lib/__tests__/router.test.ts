@@ -1,17 +1,17 @@
 import { describe, expect, test } from "vitest"
 import * as z from "zod"
-import { defineContract, event } from "../contract"
-import { TypeportError } from "../error"
+import { defineContract, channel } from "../contract"
+import { ChannelError } from "../error"
 import { createRouter } from "../router"
 
 const contract = defineContract({
   math: {
-    add: event({
+    add: channel({
       input: z.object({ a: z.number(), b: z.number().default(1) }),
       output: z.number(),
     }),
   },
-  notify: event(z.object({ message: z.string() })),
+  notify: channel(z.object({ message: z.string() })),
 })
 
 describe("createRouter", () => {
@@ -68,8 +68,8 @@ describe("createRouter", () => {
 
     // The server's fault, not the caller's — a distinct code lets edges avoid
     // reporting it as a 400.
-    expect(error).toBeInstanceOf(TypeportError)
-    expect((error as TypeportError).code).toBe("output-validation")
+    expect(error).toBeInstanceOf(ChannelError)
+    expect((error as ChannelError).code).toBe("output-validation")
   })
 
   test("passes the edge's context to every resolver", async () => {
