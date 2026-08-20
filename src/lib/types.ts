@@ -34,7 +34,8 @@ type LeafHelpers<Input extends StandardSchemaV1, Output extends StandardSchemaV1
   $path: string
 
   /**
-   * The schema for this leaf's input — for a bare-schema leaf (`event(schema)`), the schema itself.
+   * The schema for this leaf's input — for a bare-schema leaf (`channel(schema)`), the schema
+   * itself.
    */
   $input: Input
 

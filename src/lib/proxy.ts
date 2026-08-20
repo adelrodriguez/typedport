@@ -16,6 +16,14 @@ export function createRecursiveProxy(
           return
         }
 
+        // Recursing on `then` would make every node thenable: `await
+        // client.branch` dispatches "branch.then" and the await never settles.
+        // Same probe pattern for JSON.stringify and `toJSON`. `defineContract`
+        // rejects both keys, so nothing real is shadowed.
+        if (key === "then" || key === "toJSON") {
+          return
+        }
+
         const nextPath = [...path, key]
 
         // `$`-prefixed helpers (e.g. `$path`, `$schema`) are accessed directly

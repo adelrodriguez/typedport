@@ -16,7 +16,7 @@
 - 📐 **Any Standard Schema** — [Zod](https://zod.dev), [Valibot](https://valibot.dev), [ArkType](https://arktype.io), or anything else implementing [Standard Schema](https://standardschema.dev)
 - 🌲 **Nested contracts** — organize operations as a tree (`localFiles.open`); dotted paths are derived automatically
 - 🔐 **Validated at the boundary** — the router parses input against your schema before any resolver runs, and parses results against `output` on the way out so off-contract resolvers fail loudly
-- 🎯 **One primitive** — `event({ input, output })` is a round trip, `event(schema)` is one-way; every leaf is directly callable on the client
+- 🎯 **One primitive** — `channel({ input, output })` is a round trip, `channel(schema)` is one-way; every leaf is directly callable on the client
 - 🚚 **Bring your transport** — a transport is a single function `(path, payload, options?) => result`; `router.dispatch` is already one, real adapters are one-liners, and per-call options (an `AbortSignal`, a transfer list) flow through untouched via `$with` or positionally
 - 🧵 **`typedport/wire`** — optional subpath for real boundaries: a serializable error envelope, and `connect` to turn any duplex message pipe (MessagePort, worker, WebSocket) into a symmetric, timeout-guarded transport
 
@@ -33,19 +33,19 @@ Plus your schema library of choice (`zod`, `valibot`, `arktype`, ...). The examp
 Define a contract:
 
 ```typescript
-import { defineContract, event } from "typedport"
+import { defineContract, channel } from "typedport"
 import * as z from "zod"
 
 const LocalTextFile = z.object({ contents: z.string(), path: z.string() })
 
 export const contract = defineContract({
   localFiles: {
-    open: event({ input: z.void(), output: LocalTextFile.nullable() }),
-    save: event(LocalTextFile), // input only → one-way, resolves void
+    open: channel({ input: z.void(), output: LocalTextFile.nullable() }),
+    save: channel(LocalTextFile), // input only → one-way, resolves void
   },
   stripe: {
     checkout: {
-      created: event(z.object({ id: z.string() })),
+      created: channel(z.object({ id: z.string() })),
     },
   },
 })
@@ -130,17 +130,24 @@ Per-call options shallow-merge over bound ones. When the transport declares no o
 
 Input is parsed twice by design. The client parses before sending so the caller gets an error with a stack trace at the call site. The router parses again before dispatching because the sender may not be your client at all — in transports like Electron IPC the receiving process must treat every message as untrusted. Only the router's parse is a security boundary.
 
-Results flow the other way with one parse: the router validates the resolver's return against `output` before it leaves the server, and the client returns the transport's value as-is. When the peer is a typedport router the result is schema-checked end to end; when it isn't (a plain HTTP endpoint, a mock), the client's return type is a promise, not a guarantee — validate at the edge if you don't trust the peer.
-
-Every failure the library raises is a `TypeportError`, discriminated by `code` — `validation` (the caller's input failed, with the Standard Schema `issues`), `output-validation` (the resolver's result drifted off contract — the server's fault, not the caller's), `unknown-channel` (with the `path`), the `connect` lifecycle codes `timeout`, `closed`, and `no-router`, and `malformed-envelope` (`fromWire` got something that isn't an envelope). One `instanceof`, then `code` narrows the fields; anything that is _not_ a `TypeportError` came from application code:
+Results flow the other way with one parse: the router validates the resolver's return against `output` before it leaves the server, and the client returns the transport's value as-is. When the peer is a typedport router the result is schema-checked end to end; when it isn't (a plain HTTP endpoint, a mock), the client's return type is a promise, not a guarantee — validate at the edge if you don't trust the peer. The pieces are already in hand: `parseWith` is the same primitive the router uses, and every round-trip leaf carries its schema as `$output`:
 
 ```typescript
-import { TypeportError } from "typedport"
+import { parseWith } from "typedport"
+
+const raw = await api.localFiles.open()
+const file = await parseWith(api.localFiles.open.$output, raw) // now a guarantee, not a claim
+```
+
+Every failure the library raises is a `ChannelError`, discriminated by `code` — `validation` (the caller's input failed, with the Standard Schema `issues`), `output-validation` (the resolver's result drifted off contract — the server's fault, not the caller's), `unknown-channel` (with the `path`), the `connect` lifecycle codes `timeout`, `closed`, and `no-router`, and `malformed-envelope` (`fromWire` got something that isn't an envelope). One `instanceof`, then `code` narrows the fields; anything that is _not_ a `ChannelError` came from application code:
+
+```typescript
+import { ChannelError } from "typedport"
 
 try {
   await router.dispatch(path, raw)
 } catch (error) {
-  if (error instanceof TypeportError && error.code === "validation") {
+  if (error instanceof ChannelError && error.code === "validation") {
     return badRequest(error.issues)
   }
   throw error // unknown channel, or the resolver itself failed
@@ -153,7 +160,7 @@ Authenticity is the transport's job, not the core's: an HTTP adapter verifies si
 
 Two problems every real boundary hits, solved once in an optional subpath export:
 
-**Errors don't survive serialization.** A thrown `TypeportError` gets flattened by `invoke`, structured clone, or JSON. `toWire`/`fromWire` are the codec: `toWire` captures any operation's outcome as a serializable value, `fromWire` unwraps it on the other side — returning the result or rethrowing, with `TypeportError` rehydrated (code and fields intact) so `instanceof` and `code` checks work across the boundary:
+**Errors don't survive serialization.** A thrown `ChannelError` gets flattened by `invoke`, structured clone, or JSON. `toWire`/`fromWire` are the codec: `toWire` captures any operation's outcome as a serializable value, `fromWire` unwraps it on the other side — returning the result or rethrowing, with `ChannelError` rehydrated (code and fields intact) so `instanceof` and `code` checks work across the boundary:
 
 ```typescript
 import { fromWire, toWire } from "typedport/wire"
@@ -161,7 +168,7 @@ import { fromWire, toWire } from "typedport/wire"
 // server edge — never throws, always resolves a serializable WireResult
 ipcMain.handle(channel, (_event, payload) => toWire(router.dispatch(channel, payload)))
 
-// client edge — unwraps the result or rethrows, TypeportError intact
+// client edge — unwraps the result or rethrows, ChannelError intact
 const api = createClient(contract, async (path, payload) =>
   fromWire(await window.typedport.send(path, payload))
 )
@@ -181,7 +188,17 @@ const { transport, close } = connect(wire, {
 })
 ```
 
-`connect` is symmetric: call it on both ends of a duplex pipe, each with its own router, and each side gets a transport for calling the other. It speaks the envelope internally, so error fidelity comes for free — which also makes it a **trusted-peer** transport: the peer sees every `TypeportError` detail, including server-fault codes like `output-validation`. An untrusted peer (a browser talking to a public server) belongs behind an edge that redacts, like the HTTP recipe. `close(reason?)` rejects everything in flight and future calls — wire it to whatever liveness signal the pipe has (a window's `closed`, a socket's `close`).
+`connect` is symmetric: call it on both ends of a duplex pipe, each with its own router, and each side gets a transport for calling the other. It speaks the envelope internally, so error fidelity comes for free — which also makes it a **trusted-peer** transport: the peer sees every `ChannelError` detail, including server-fault codes like `output-validation`. An untrusted peer (a browser talking to a public server) belongs behind an edge that redacts, like the HTTP recipe. `close(reason?)` rejects everything in flight and future calls — wire it to whatever liveness signal the pipe has (a window's `closed`, a socket's `close`).
+
+## Writing an adapter
+
+Adapters live in your codebase, not in this package — a transport is one function, and the examples in this repo (worker threads, WebSocket, Hono) are the reference implementations. These exports are the supported toolkit for building one:
+
+- **`flatten(contract)`** — the tree as a flat `Record<path, Leaf>`, for edges that register endpoints ahead of time (`router.channels` is the same list of paths).
+- **`isLeaf(node)`** — the discriminant for walking a `ContractTree` yourself.
+- **`parseWith(schema, value)`** — the single parse primitive the client and router use; reuse it to validate on a path the router never sees (a publish edge, a response you don't trust). Throws `ChannelError` with code `validation` and the Standard Schema `issues`.
+- **Types** — annotate your adapter's function as `Transport` (declare an options parameter and it flows to every call site), accept contracts as `ContractTree`, and constrain one-way adapters to `OneWayContract` so a round-trip leaf is a compile error. `InferClient` and `Leaf` cover the places you wrap or re-expose the client.
+- **`toWire` / `fromWire`** (from `typedport/wire`) — the error-fidelity codec for any serializing boundary, and `connect` when the boundary is a duplex message pipe.
 
 ## Recipes
 
@@ -209,7 +226,7 @@ export const api = createClient(contract, async (path, payload) => (await ready)
 <details>
 <summary><strong>HTTP / fetch</strong> — any framework that speaks Request/Response</summary>
 
-The server edge is a fetch handler (Hono, Next.js route handlers, Bun, and Deno all accept one). The wire envelope carries every outcome, so a `TypeportError` thrown by the router arrives in the browser with its `code` and fields intact:
+The server edge is a fetch handler (Hono, Next.js route handlers, Bun, and Deno all accept one). The wire envelope carries every outcome, so a `ChannelError` thrown by the router arrives in the browser with its `code` and fields intact:
 
 ```typescript
 import { toWire } from "typedport/wire"
@@ -302,7 +319,7 @@ import { contract } from "./contract"
 export const api = createClient(contract, (path, payload) => window.typedport.send(path, payload))
 ```
 
-One-way leaves ride `invoke` too — the extra empty response is harmless and keeps the edge to a single function. Note that `ipcRenderer.invoke` re-throws only the error message string, so a `TypeportError` from the main process arrives in the renderer as a flat `Error`. If you need structured errors, wrap both edges in the `typedport/wire` envelope: `toWire(router.dispatch(channel, payload))` in the `handle` callback, `fromWire(await ...)` in the transport. If you load remote content, also check `event.senderFrame` before dispatching.
+One-way leaves ride `invoke` too — the extra empty response is harmless and keeps the edge to a single function. Note that `ipcRenderer.invoke` re-throws only the error message string, so a `ChannelError` from the main process arrives in the renderer as a flat `Error`. If you need structured errors, wrap both edges in the `typedport/wire` envelope: `toWire(router.dispatch(channel, payload))` in the `handle` callback, `fromWire(await ...)` in the transport. If you load remote content, also check `event.senderFrame` before dispatching.
 
 </details>
 
@@ -390,7 +407,7 @@ const ready = new Promise<Transport>((resolve) => {
 export const api = createClient(contract, async (path, payload) => (await ready)(path, payload))
 ```
 
-Port messages buffer until the receiving end calls `start()`, and the deferred transport buffers calls until the port lands — no ready-handshake needed. A `TypeportError` thrown by either router arrives on the other side as a real `TypeportError` with its code and fields. The same wrappers work for Web Workers, iframes, and utility processes; only the port hand-off differs.
+Port messages buffer until the receiving end calls `start()`, and the deferred transport buffers calls until the port lands — no ready-handshake needed. A `ChannelError` thrown by either router arrives on the other side as a real `ChannelError` with its code and fields. The same wrappers work for Web Workers, iframes, and utility processes; only the port hand-off differs.
 
 </details>
 

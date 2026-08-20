@@ -1,18 +1,18 @@
 import type { Router } from "./router"
 import type { Transport } from "./types"
-import { detailOf, TypeportError, type TypeportErrorDetail } from "./error"
+import { detailOf, ChannelError, type ChannelErrorDetail } from "./error"
 
 /**
  * An outcome flattened to a serializable value, so errors survive boundaries that structured-clone
  * or JSON-encode (Electron `invoke`, `postMessage`, HTTP). `detail` is present exactly when the
- * failure was a `TypeportError`, letting `fromWire` rehydrate it — code and fields intact — on the
+ * failure was a `ChannelError`, letting `fromWire` rehydrate it — code and fields intact — on the
  * other side.
  */
 export type WireResult =
   | { ok: true; result: unknown }
   | {
       ok: false
-      error: { detail?: TypeportErrorDetail; message: string; name: string }
+      error: { detail?: ChannelErrorDetail; message: string; name: string }
     }
 
 /**
@@ -30,7 +30,7 @@ export async function toWire(operation: Promise<unknown> | (() => unknown)): Pro
 }
 
 /**
- * Unwraps a `WireResult`: returns the result, or rethrows the failure — with `TypeportError`
+ * Unwraps a `WireResult`: returns the result, or rethrows the failure — with `ChannelError`
  * rehydrated (code and fields intact) so `instanceof` and `code` checks work across the boundary.
  *
  * Takes `unknown` because at a real boundary the value is untrusted: a gateway error page or a
@@ -40,8 +40,8 @@ export async function toWire(operation: Promise<unknown> | (() => unknown)): Pro
 export function fromWire(data: unknown): unknown {
   if (!isEnvelope(data)) {
     // A library-raised failure, so it follows the one rule: it is a
-    // TypeportError, and adapters can branch on its code.
-    throw new TypeportError({ code: "malformed-envelope" })
+    // ChannelError, and adapters can branch on its code.
+    throw new ChannelError({ code: "malformed-envelope" })
   }
 
   if (data.ok) {
@@ -49,7 +49,7 @@ export function fromWire(data: unknown): unknown {
   }
 
   if (data.error.detail) {
-    throw new TypeportError(data.error.detail)
+    throw new ChannelError(data.error.detail)
   }
 
   const error = new Error(data.error.message)
@@ -100,14 +100,14 @@ type PendingEntry = {
  * A pipe is one peer, so `context` is per-connection: whatever identity the edge established (the
  * session, the window) is passed to every dispatch this end serves.
  *
- * Full error fidelity is the point of the protocol: the peer receives every `TypeportError` detail,
+ * Full error fidelity is the point of the protocol: the peer receives every `ChannelError` detail,
  * including server-fault codes like `output-validation`. That makes `connect` a trusted-peer
  * transport (a worker, a MessagePort, your own processes). A peer that should not see server-side
  * detail — a browser talking to a public server — belongs behind an edge that redacts, like the
  * HTTP recipes do.
  *
  * `timeoutMs` bounds each outgoing call; without it a dead peer leaves calls pending forever.
- * `close(reason?)` rejects everything in flight and every future call with a `TypeportError` (code
+ * `close(reason?)` rejects everything in flight and every future call with a `ChannelError` (code
  * `closed`, the reason in `cause`) and stops serving — wire it to whatever liveness signal the pipe
  * has (a window's `closed`, a socket's `close`).
  */
@@ -160,7 +160,7 @@ export function connect<Context = void>(
         return
       }
 
-      closed = new TypeportError({ code: "closed" }, { cause: reason })
+      closed = new ChannelError({ code: "closed" }, { cause: reason })
 
       if (typeof unsubscribe === "function") {
         unsubscribe()
@@ -186,7 +186,7 @@ export function connect<Context = void>(
             ? undefined
             : setTimeout(() => {
                 pending.delete(id)
-                reject(new TypeportError({ code: "timeout", path, timeoutMs }))
+                reject(new ChannelError({ code: "timeout", path, timeoutMs }))
               }, timeoutMs)
 
         pending.set(id, {
@@ -227,7 +227,7 @@ export function connect<Context = void>(
     const result: WireResult = dispatch
       ? // The thunk form lets toWire capture even a synchronously-throwing dispatch.
         await toWire(() => dispatch(message.path, message.payload, context))
-      : { error: serializeError(new TypeportError({ code: "no-router" })), ok: false }
+      : { error: serializeError(new ChannelError({ code: "no-router" })), ok: false }
 
     if (!closed) {
       try {
@@ -242,7 +242,7 @@ export function connect<Context = void>(
 }
 
 function serializeError(error: unknown): Exclude<WireResult, { ok: true }>["error"] {
-  if (error instanceof TypeportError) {
+  if (error instanceof ChannelError) {
     return { detail: detailOf(error), message: error.message, name: error.name }
   }
 

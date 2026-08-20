@@ -1,6 +1,6 @@
 import type { ContractTree, Leaf } from "./contract"
 import type { InferClient, Transport } from "./types"
-import { TypeportError } from "./error"
+import { ChannelError } from "./error"
 import { createRecursiveProxy } from "./proxy"
 import { parseWith } from "./standard"
 import { flatten } from "./utils"
@@ -95,7 +95,7 @@ function getLeaf(leaves: Record<string, Leaf>, path: string): Leaf {
   const leaf = leaves[path]
 
   if (!leaf) {
-    throw new TypeportError({ code: "unknown-channel", path })
+    throw new ChannelError({ code: "unknown-channel", path })
   }
 
   return leaf
