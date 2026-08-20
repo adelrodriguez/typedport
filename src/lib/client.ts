@@ -1,4 +1,4 @@
-import type { ContractTree, Leaf } from "./contract"
+import type { ContractTree, Channel } from "./contract"
 import type { InferClient, Transport } from "./types"
 import { ChannelError } from "./error"
 import { createRecursiveProxy } from "./proxy"
@@ -35,16 +35,16 @@ export function createClient<Tree extends ContractTree, Options = never>(
 
       if (last === "$path") {
         const parentPath = path.slice(0, -1).join(".")
-        getLeaf(leaves, parentPath)
+        getChannel(leaves, parentPath)
         return parentPath
       }
 
       if (last === "$input") {
-        return getLeaf(leaves, path.slice(0, -1).join(".")).input
+        return getChannel(leaves, path.slice(0, -1).join(".")).input
       }
 
       if (last === "$output") {
-        return getLeaf(leaves, path.slice(0, -1).join(".")).output
+        return getChannel(leaves, path.slice(0, -1).join(".")).output
       }
 
       // Calls always return a promise: validation and misuse failures reject
@@ -59,7 +59,7 @@ export function createClient<Tree extends ContractTree, Options = never>(
     input: unknown,
     options: Options | undefined
   ): Promise<unknown> {
-    const leaf = getLeaf(leaves, leafPath)
+    const leaf = getChannel(leaves, leafPath)
 
     // The transport's result is passed through untouched. For one-way leaves the
     // call is typed `Promise<void>`, but the raw value (a queue receipt, an ack)
@@ -91,7 +91,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-function getLeaf(leaves: Record<string, Leaf>, path: string): Leaf {
+function getChannel(leaves: Record<string, Channel>, path: string): Channel {
   const leaf = leaves[path]
 
   if (!leaf) {

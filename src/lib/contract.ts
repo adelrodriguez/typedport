@@ -1,6 +1,6 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
-export type Leaf<
+export type Channel<
   Input extends StandardSchemaV1 = StandardSchemaV1,
   Output extends StandardSchemaV1 | undefined = StandardSchemaV1 | undefined,
 > = {
@@ -10,7 +10,7 @@ export type Leaf<
 }
 
 export type ContractTree = {
-  [key: string]: ContractTree | Leaf
+  [key: string]: ContractTree | Channel
 }
 
 /**
@@ -20,25 +20,25 @@ export type ContractTree = {
  * a call that silently resolves the wrong value.
  */
 export type OneWayContract = {
-  [key: string]: Leaf<StandardSchemaV1, undefined> | OneWayContract
+  [key: string]: Channel<StandardSchemaV1, undefined> | OneWayContract
 }
 
 /**
- * A contract leaf. With `input` and `output` it is a round trip: the client validates `input`
- * before sending, the router validates it again before dispatching, and the router validates the
- * resolver's return value against `output` before the result leaves the server — the client returns
- * the transport's value as-is. With a bare schema (`channel(schema)`) it is one-way: the resolver's
- * return value is discarded and the client types the call `Promise<void>`. Schemas are anything
- * implementing Standard Schema (Zod, Valibot, ArkType, ...).
+ * A channel — one leaf of the contract tree. With `input` and `output` it is a round trip: the
+ * client validates `input` before sending, the router validates it again before dispatching, and
+ * the router validates the resolver's return value against `output` before the result leaves the
+ * server — the client returns the transport's value as-is. With a bare schema (`channel(schema)`)
+ * it is one-way: the resolver's return value is discarded and the client types the call
+ * `Promise<void>`. Schemas are anything implementing Standard Schema (Zod, Valibot, ArkType, ...).
  */
 export function channel<
   Input extends StandardSchemaV1,
   Output extends StandardSchemaV1,
->(definition: { input: Input; output: Output }): Leaf<Input, Output>
-export function channel<Input extends StandardSchemaV1>(input: Input): Leaf<Input, undefined>
+>(definition: { input: Input; output: Output }): Channel<Input, Output>
+export function channel<Input extends StandardSchemaV1>(input: Input): Channel<Input, undefined>
 export function channel(
   definition: StandardSchemaV1 | { input: StandardSchemaV1; output?: StandardSchemaV1 }
-): Leaf {
+): Channel {
   if ("~standard" in definition) {
     return { _kind: "channel", input: definition, output: undefined }
   }
@@ -46,7 +46,7 @@ export function channel(
   return { _kind: "channel", input: definition.input, output: definition.output }
 }
 
-export function isLeaf(node: ContractTree | Leaf): node is Leaf {
+export function isChannel(node: ContractTree | Channel): node is Channel {
   // Checking the discriminant's value (not just its presence) keeps a branch
   // that happens to contain a "_kind" key from masquerading as a leaf.
   return "_kind" in node && node._kind === "channel"
@@ -85,7 +85,7 @@ function* walkKeys(tree: ContractTree, prefix = ""): Generator<[path: string, ke
 
     yield [path, key]
 
-    if (!isLeaf(node)) {
+    if (!isChannel(node)) {
       yield* walkKeys(node, path)
     }
   }

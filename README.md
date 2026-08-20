@@ -194,10 +194,10 @@ const { transport, close } = connect(wire, {
 
 Adapters live in your codebase, not in this package — a transport is one function, and the examples in this repo (worker threads, WebSocket, Hono) are the reference implementations. These exports are the supported toolkit for building one:
 
-- **`flatten(contract)`** — the tree as a flat `Record<path, Leaf>`, for edges that register endpoints ahead of time (`router.channels` is the same list of paths).
-- **`isLeaf(node)`** — the discriminant for walking a `ContractTree` yourself.
+- **`flatten(contract)`** — the tree as a flat `Record<path, Channel>`, for edges that register endpoints ahead of time (`router.channels` is the same list of paths).
+- **`isChannel(node)`** — the discriminant for walking a `ContractTree` yourself.
 - **`parseWith(schema, value)`** — the single parse primitive the client and router use; reuse it to validate on a path the router never sees (a publish edge, a response you don't trust). Throws `ChannelError` with code `validation` and the Standard Schema `issues`.
-- **Types** — annotate your adapter's function as `Transport` (declare an options parameter and it flows to every call site), accept contracts as `ContractTree`, and constrain one-way adapters to `OneWayContract` so a round-trip leaf is a compile error. `InferClient` and `Leaf` cover the places you wrap or re-expose the client.
+- **Types** — annotate your adapter's function as `Transport` (declare an options parameter and it flows to every call site), accept contracts as `ContractTree`, and constrain one-way adapters to `OneWayContract` so a round-trip leaf is a compile error. `InferClient` and `Channel` cover the places you wrap or re-expose the client.
 - **`toWire` / `fromWire`** (from `typedport/wire`) — the error-fidelity codec for any serializing boundary, and `connect` when the boundary is a duplex message pipe.
 
 ## Recipes

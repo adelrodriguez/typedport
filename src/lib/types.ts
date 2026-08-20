@@ -1,5 +1,5 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type { Leaf } from "./contract"
+import type { Channel } from "./contract"
 
 type UnionToIntersection<U> = (U extends unknown ? (k: U) => void : never) extends (
   k: infer I
@@ -27,7 +27,7 @@ export type Transport<Options = never> = (
   options?: Options
 ) => MaybePromise<unknown>
 
-type LeafHelpers<Input extends StandardSchemaV1, Output extends StandardSchemaV1 | undefined> = {
+type ChannelHelpers<Input extends StandardSchemaV1, Output extends StandardSchemaV1 | undefined> = {
   /**
    * The dotted path to this leaf (e.g., "localFiles.open").
    */
@@ -53,8 +53,8 @@ type LeafHelpers<Input extends StandardSchemaV1, Output extends StandardSchemaV1
  * bound — per-call options shallow-merge over bound ones.
  */
 export type InferClient<Tree, Options = never> = {
-  [Key in keyof Tree]: Tree[Key] extends Leaf<infer Input, infer Output>
-    ? LeafHelpers<Input, Output> &
+  [Key in keyof Tree]: Tree[Key] extends Channel<infer Input, infer Output>
+    ? ChannelHelpers<Input, Output> &
         (Output extends StandardSchemaV1
           ? (
               input: StandardSchemaV1.InferInput<Input>,
@@ -68,8 +68,8 @@ export type InferClient<Tree, Options = never> = {
 
 type Join<Prefix extends string, Key extends string> = Prefix extends "" ? Key : `${Prefix}.${Key}`
 
-type FlatLeaves<Tree, Context, Prefix extends string = ""> = {
-  [Key in keyof Tree & string]: Tree[Key] extends Leaf<infer Input, infer Output>
+type FlatChannels<Tree, Context, Prefix extends string = ""> = {
+  [Key in keyof Tree & string]: Tree[Key] extends Channel<infer Input, infer Output>
     ? Output extends StandardSchemaV1
       ? Record<
           Join<Prefix, Key>,
@@ -82,7 +82,7 @@ type FlatLeaves<Tree, Context, Prefix extends string = ""> = {
           Join<Prefix, Key>,
           (input: StandardSchemaV1.InferOutput<Input>, context: Context) => unknown
         >
-    : FlatLeaves<Tree[Key], Context, Join<Prefix, Key>>
+    : FlatChannels<Tree[Key], Context, Join<Prefix, Key>>
 }[keyof Tree & string]
 
 /**
@@ -92,4 +92,4 @@ type FlatLeaves<Tree, Context, Prefix extends string = ""> = {
  * `output` schema must return something it accepts; a one-way leaf's resolver may return anything —
  * the router discards it.
  */
-export type InferResolvers<Tree, Context = void> = UnionToIntersection<FlatLeaves<Tree, Context>>
+export type InferResolvers<Tree, Context = void> = UnionToIntersection<FlatChannels<Tree, Context>>

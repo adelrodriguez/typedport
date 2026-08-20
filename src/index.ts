@@ -3,8 +3,8 @@ export {
   channel,
   type ContractTree,
   defineContract,
-  isLeaf,
-  type Leaf,
+  isChannel,
+  type Channel,
   type OneWayContract,
 } from "./lib/contract"
 export { ChannelError, type ChannelErrorDetail } from "./lib/error"
