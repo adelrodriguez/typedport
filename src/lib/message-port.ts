@@ -138,10 +138,10 @@ function defaultWindow(caller: string): MessageWindowLike {
 /**
  * Renderer end of the hand-off: resolves with the port the preload relays on `type`. The guard
  * accepts only same-window messages carrying the agreed type and an actual port, which shuts out
- * senders in *other* windows — an iframe, a compromised `opener`. It cannot shut out a script
- * already running in this window (`event.source` names the sending window, not the sending
- * script), and no postMessage protocol can; same-window injection defeats the page wholesale.
- * Feed the result to {@link domPort}; `connect` accepts the pending promise directly:
+ * senders in _other_ windows — an iframe, a compromised `opener`. It cannot shut out a script
+ * already running in this window (`event.source` names the sending window, not the sending script),
+ * and no postMessage protocol can; same-window injection defeats the page wholesale. Feed the
+ * result to {@link domPort}; `connect` accepts the pending promise directly:
  * `connect(receivePort("app:port").then(domPort), { router })`.
  */
 export function receivePort(type: string, target?: MessageWindowLike): Promise<DomPortLike> {
