@@ -7,7 +7,6 @@ import { webSocket, whenOpen, type WebSocketLike } from "../web-socket"
 import { connect } from "../wire"
 
 type MessageListener = (event: { data: unknown }) => void
-type PlainListener = () => void
 
 type FakeSocket = WebSocketLike & {
   open: () => void
