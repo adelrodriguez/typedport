@@ -40,6 +40,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Vitest does not check types, and the implement() suite's compile-time
+      # assertions (@ts-expect-error) only fail under tsc — without this step a
+      # weakened type keeps CI green while the README's promises go stale.
+      - name: Typecheck
+        run: pnpm run typecheck
+
       - name: Run tests
         run: pnpm run test
 

@@ -123,9 +123,20 @@ export function connect<Context = void>(
   const source: Wire =
     "send" in wire
       ? wire
-      : deferWire(wire, (reason) => {
-          close(reason)
-        })
+      : deferWire(
+          wire,
+          (reason) => {
+            close(reason)
+          },
+          // A queued request whose caller already timed out must not reach the
+          // peer once the wire arrives — the reply would be dropped, but the
+          // peer's resolver would still run. Anything that isn't a request
+          // (responses to calls the peer somehow made this early) still flows.
+          (data) => {
+            const message = data as { kind?: string; id?: number }
+            return message.kind !== "req" || (message.id !== undefined && pending.has(message.id))
+          }
+        )
   const { context, router, timeoutMs } = options
   const dispatch = router?.dispatch as
     | ((path: string, raw: unknown, context?: Context) => Promise<unknown>)
@@ -257,11 +268,16 @@ export function connect<Context = void>(
 /**
  * A `Wire` over a wire that hasn't arrived yet: outbound data buffers, the listener attaches on
  * arrival, and unsubscribing before arrival detaches permanently — so a `close` that wins the race
- * leaves a late wire untouched. A rejected promise reports through `onReject` (connect closes with
- * it); the buffered data is dropped with the connection, which is what the caller's pending-call
- * rejections already communicate.
+ * leaves a late wire untouched. The flush asks `stillWanted` per entry, so a request whose caller
+ * gave up (timed out) while the wire was pending is dropped instead of sent. A rejected promise
+ * reports through `onReject` (connect closes with it); the buffered data is dropped with the
+ * connection, which is what the caller's pending-call rejections already communicate.
  */
-function deferWire(pending: Promise<Wire>, onReject: (reason: Error) => void): Wire {
+function deferWire(
+  pending: Promise<Wire>,
+  onReject: (reason: Error) => void,
+  stillWanted: (data: unknown) => boolean
+): Wire {
   let inner: Wire | undefined
   let listener: ((data: unknown) => void) | undefined
   let innerUnsubscribe: (() => void) | undefined = undefined
@@ -282,7 +298,9 @@ function deferWire(pending: Promise<Wire>, onReject: (reason: Error) => void): W
     }
 
     for (const data of outbox.splice(0)) {
-      wire.send(data)
+      if (stillWanted(data)) {
+        wire.send(data)
+      }
     }
   }
 

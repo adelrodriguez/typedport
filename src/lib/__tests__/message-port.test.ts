@@ -253,14 +253,23 @@ describe("relayPort", () => {
 })
 
 describe("sendPort", () => {
-  test("ships the port once the page has loaded", () => {
-    const { main } = createPortPair()
-    const posted: Array<{ channel: string; message: unknown; transfer?: unknown[] }> = []
+  type Posted = { channel: string; message: unknown; transfer?: unknown[] }
+
+  function createFakeWebContents(options: { loading: boolean; url: string }): {
+    win: Parameters<typeof sendPort>[0]
+    posted: Posted[]
+    finishLoad: () => void
+  } {
+    const posted: Posted[] = []
     let onLoad: (() => void) | undefined
 
-    sendPort(
-      {
+    return {
+      finishLoad: () => onLoad?.(),
+      posted,
+      win: {
         webContents: {
+          getURL: () => options.url,
+          isLoading: () => options.loading,
           once: (_event, listener) => {
             onLoad = listener
           },
@@ -269,14 +278,43 @@ describe("sendPort", () => {
           },
         },
       },
-      main,
-      "app:port"
-    )
+    }
+  }
+
+  test("ships the port once a still-loading page finishes", () => {
+    const { main } = createPortPair()
+    const { win, posted, finishLoad } = createFakeWebContents({ loading: true, url: "" })
+
+    sendPort(win, main, "app:port")
 
     // Nothing moves before the page can receive it.
     expect(posted).toEqual([])
 
-    onLoad?.()
+    finishLoad()
+
+    expect(posted).toEqual([{ channel: "app:port", message: null, transfer: [main] }])
+  })
+
+  test("ships the port immediately when the page has already loaded", () => {
+    const { main } = createPortPair()
+    // The state after `await win.loadURL(url)`: did-finish-load already fired,
+    // so waiting for it again would wait forever.
+    const { win, posted } = createFakeWebContents({ loading: false, url: "https://app.local/" })
+
+    sendPort(win, main, "app:port")
+
+    expect(posted).toEqual([{ channel: "app:port", message: null, transfer: [main] }])
+  })
+
+  test("waits for the first load when no page has been loaded yet", () => {
+    const { main } = createPortPair()
+    const { win, posted, finishLoad } = createFakeWebContents({ loading: false, url: "" })
+
+    sendPort(win, main, "app:port")
+
+    expect(posted).toEqual([])
+
+    finishLoad()
 
     expect(posted).toEqual([{ channel: "app:port", message: null, transfer: [main] }])
   })

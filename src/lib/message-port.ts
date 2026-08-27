@@ -136,10 +136,12 @@ function defaultWindow(caller: string): MessageWindowLike {
 }
 
 /**
- * Renderer end of the hand-off: resolves with the port the preload relays on `type`. The guard is
- * deliberate security surface — only same-window messages (i.e. the preload's relay) carrying the
- * agreed type and an actual port are accepted, so an injected script cannot substitute a port it
- * controls. Feed the result to {@link domPort}; `connect` accepts the pending promise directly:
+ * Renderer end of the hand-off: resolves with the port the preload relays on `type`. The guard
+ * accepts only same-window messages carrying the agreed type and an actual port, which shuts out
+ * senders in *other* windows — an iframe, a compromised `opener`. It cannot shut out a script
+ * already running in this window (`event.source` names the sending window, not the sending
+ * script), and no postMessage protocol can; same-window injection defeats the page wholesale.
+ * Feed the result to {@link domPort}; `connect` accepts the pending promise directly:
  * `connect(receivePort("app:port").then(domPort), { router })`.
  */
 export function receivePort(type: string, target?: MessageWindowLike): Promise<DomPortLike> {
@@ -193,6 +195,8 @@ export function relayPort(
  */
 export type PortWindowLike = {
   webContents: {
+    getURL(): string
+    isLoading(): boolean
     once(event: "did-finish-load", listener: () => void): unknown
     postMessage(channel: string, message: unknown, transfer?: unknown[]): void
   }
@@ -200,11 +204,24 @@ export type PortWindowLike = {
 
 /**
  * Main-process end of the hand-off: ships one end of a `MessageChannelMain` to a window once the
- * page can receive it. Window lifecycle stays the caller's business — pair this with
- * `win.on("closed", () => close(...))` on the `connect` session serving the other end.
+ * page can receive it. If a page has already finished loading, the port posts immediately —
+ * `loadURL()` resolves on `did-finish-load`, so a caller that awaited it would otherwise register
+ * for an event that already fired and the hand-off would silently never happen.
+ *
+ * A transferred port is spent, so a reload needs a fresh `MessageChannelMain` and another
+ * `sendPort` call (from your own `did-finish-load` handler). Window lifecycle stays the caller's
+ * business — pair this with `win.on("closed", () => close(...))` on the `connect` session serving
+ * the other end.
  */
 export function sendPort(win: PortWindowLike, port: MainPortLike, type: string): void {
-  win.webContents.once("did-finish-load", () => {
-    win.webContents.postMessage(type, null, [port])
+  const { webContents } = win
+
+  if (!webContents.isLoading() && webContents.getURL() !== "") {
+    webContents.postMessage(type, null, [port])
+    return
+  }
+
+  webContents.once("did-finish-load", () => {
+    webContents.postMessage(type, null, [port])
   })
 }

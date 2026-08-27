@@ -330,6 +330,36 @@ describe("connect over a pending wire", () => {
     expect(sent).toEqual([])
   })
 
+  test("does not flush requests whose callers already timed out", async () => {
+    const { promise: pending, resolve: deliver } = Promise.withResolvers<Wire>()
+
+    const client = connect(pending, { timeoutMs: 5 })
+    const api = createClient(pullContract, client.transport)
+
+    // Times out while the wire is still pending; the queued frame must die with it.
+    await expect(api.math.add({ a: 2, b: 3 })).rejects.toMatchObject({ code: "timeout" })
+
+    const attached: unknown[] = []
+    const sent: unknown[] = []
+    deliver({
+      onMessage: (listener) => {
+        attached.push(listener)
+      },
+      send: (data) => {
+        sent.push(data)
+      },
+    })
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0)
+    })
+
+    // The connection is still open (the listener attaches), but the peer must
+    // not run a resolver for a call nobody is waiting on.
+    expect(attached).toHaveLength(1)
+    expect(sent).toEqual([])
+  })
+
   test("a rejected wire promise closes the connection with the reason as cause", async () => {
     const reason = new Error("no port for you")
     const client = connect(Promise.reject(reason))

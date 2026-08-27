@@ -59,7 +59,7 @@ import { createRouter } from "typedport"
 
 const router = createRouter(contract, {
   "localFiles.open": async () => openFile(),
-  "localFiles.save": async ({ path, contents }) => save(path, contents),
+  "localFiles.save": async ({ path, contents }) => saveFile(path, contents),
   "stripe.checkout.created": async ({ id }) => record(id),
 })
 
@@ -111,7 +111,7 @@ export const tp = implement(contract).$context<Session>()
 import { tp } from "../contract"
 
 export const open = tp.localFiles.open(async (_input, session) => openFile(session.userId))
-export const save = tp.localFiles.save(async ({ path, contents }) => save(path, contents))
+export const save = tp.localFiles.save(async ({ path, contents }) => saveFile(path, contents))
 ```
 
 ```typescript
@@ -437,7 +437,7 @@ const { transport } = connect(receivePort("typedport:port").then(domPort), {
 export const api = createClient(contract, transport)
 ```
 
-No ready-handshake exists anywhere. Ports buffer until `start()` (the wires call it once their listener is attached), and `connect` buffers calls until the port lands. A `ChannelError` thrown by either router arrives on the other side as a real `ChannelError` with its code and fields. `receivePort` only accepts same-window messages of the agreed type that carry an actual port, so an injected script cannot substitute one it controls.
+No ready-handshake exists anywhere. Ports buffer until `start()` (the wires call it once their listener is attached), and `connect` buffers calls until the port lands. Call `attach` before or after `loadURL`: `sendPort` posts immediately when a page has already loaded and waits for `did-finish-load` otherwise (a reload needs a fresh channel, since a transferred port is spent). A `ChannelError` thrown by either router arrives on the other side as a real `ChannelError` with its code and fields. `receivePort` only accepts same-window messages of the agreed type that carry an actual port, which shuts out senders in other windows (an iframe, a compromised `opener`). A script already running in the same window is outside any postMessage guard's reach.
 
 Utility processes use the same `mainPort` wire, because their ports are `MessagePortMain`-shaped too:
 

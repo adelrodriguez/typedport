@@ -9,7 +9,7 @@ export type WebSocketLike = {
   readyState: number
   send(data: string): void
   addEventListener(type: "message", listener: (event: { data: unknown }) => void): void
-  addEventListener(type: "open", listener: () => void): void
+  addEventListener(type: "open" | "close" | "error", listener: () => void): void
   removeEventListener(type: "message", listener: (event: { data: unknown }) => void): void
 }
 
@@ -30,7 +30,22 @@ export function webSocket(socket: WebSocketLike): Wire {
     onMessage: (listener) => {
       const handle = (event: { data: unknown }): void => {
         // Text frames arrive as strings in browsers and Buffers from `ws`.
-        listener(JSON.parse(typeof event.data === "string" ? event.data : String(event.data)))
+        const raw = typeof event.data === "string" ? event.data : String(event.data)
+
+        let data: unknown
+
+        try {
+          data = JSON.parse(raw)
+        } catch {
+          // A malformed frame from an untrusted peer must not throw out of the
+          // listener: on a `ws` server that propagates as an uncaughtException
+          // and kills the process. Drop the frame; if it was a mangled reply,
+          // the sender's own timeout covers it. Only the parse is guarded —
+          // an error thrown by `listener` is a real failure and still surfaces.
+          return
+        }
+
+        listener(data)
       }
 
       socket.addEventListener("message", handle)
@@ -46,16 +61,24 @@ export function webSocket(socket: WebSocketLike): Wire {
 }
 
 /**
- * Resolves with the socket once it can send — immediately if it already can.
+ * Resolves with the socket once it can send — immediately if it already can. Rejects if the socket
+ * errors or closes before opening, so a dead endpoint fails loudly instead of leaving the promise
+ * (and everything `connect` queued behind it) pending forever.
  */
 export function whenOpen<Socket extends WebSocketLike>(socket: Socket): Promise<Socket> {
   if (socket.readyState === OPEN) {
     return Promise.resolve(socket)
   }
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     socket.addEventListener("open", () => {
       resolve(socket)
+    })
+    socket.addEventListener("error", () => {
+      reject(new Error("Socket failed before opening"))
+    })
+    socket.addEventListener("close", () => {
+      reject(new Error("Socket closed before opening"))
     })
   })
 }
