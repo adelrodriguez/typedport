@@ -243,7 +243,7 @@ The port flavors share an idea but not an interface, and hand-copied wrappers ro
 | `webSocket` | Wraps a browser/Node `WebSocket` or a `ws` socket as a `Wire` over JSON frames   |
 | `whenOpen`  | Resolves with the socket once it can send; pairs with the pending-wire `connect` |
 
-One caveat on `webSocket`: sockets carry frames, not values, so the envelope rides JSON there. Payloads must survive JSON, unlike on the structured-clone transports.
+Two caveats on `webSocket`. Sockets carry frames, not values, so the envelope rides JSON there: payloads must survive JSON, unlike on the structured-clone transports. And `whenOpen` detaches its listeners once it settles, so on a `ws` socket Node's throw-on-unhandled-`error` default applies after open — attach your own `error` listener alongside the `close` one you wire to `session.close`.
 
 ## Writing an adapter
 

@@ -65,6 +65,9 @@ export function webSocket(socket: WebSocketLike): Wire {
  * Resolves with the socket once it can send — immediately if it already can. Rejects if the socket
  * errors or closes before opening, so a dead endpoint fails loudly instead of leaving the promise
  * (and everything `connect` queued behind it) pending forever.
+ *
+ * The listeners detach once the promise settles, so a `ws` socket keeps Node's
+ * throw-on-unhandled-`error` default after it opens. Attach your own `error` listener there.
  */
 export function whenOpen<Socket extends WebSocketLike>(socket: Socket): Promise<Socket> {
   if (socket.readyState === OPEN) {
