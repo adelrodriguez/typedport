@@ -11,6 +11,7 @@ export type WebSocketLike = {
   addEventListener(type: "message", listener: (event: { data: unknown }) => void): void
   addEventListener(type: "open" | "close" | "error", listener: () => void): void
   removeEventListener(type: "message", listener: (event: { data: unknown }) => void): void
+  removeEventListener(type: "open" | "close" | "error", listener: () => void): void
 }
 
 // WebSocket.OPEN — a static on the class, so the constant is restated here rather than reached
@@ -71,14 +72,29 @@ export function whenOpen<Socket extends WebSocketLike>(socket: Socket): Promise<
   }
 
   return new Promise((resolve, reject) => {
-    socket.addEventListener("open", () => {
+    // Detach on settle: a lingering "error" listener would otherwise suppress
+    // ws's throw-on-unhandled-error for the socket's whole life, not just the
+    // pre-open window this function owns.
+    const detach = (): void => {
+      socket.removeEventListener("open", onOpen)
+      socket.removeEventListener("error", onError)
+      socket.removeEventListener("close", onClose)
+    }
+    const onOpen = (): void => {
+      detach()
       resolve(socket)
-    })
-    socket.addEventListener("error", () => {
+    }
+    const onError = (): void => {
+      detach()
       reject(new Error("Socket failed before opening"))
-    })
-    socket.addEventListener("close", () => {
+    }
+    const onClose = (): void => {
+      detach()
       reject(new Error("Socket closed before opening"))
-    })
+    }
+
+    socket.addEventListener("open", onOpen)
+    socket.addEventListener("error", onError)
+    socket.addEventListener("close", onClose)
   })
 }

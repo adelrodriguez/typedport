@@ -12,6 +12,7 @@ type FakeSocket = WebSocketLike & {
   open: () => void
   fail: () => void
   hangUp: () => void
+  listenerCount: (type: string) => number
 }
 
 // A connected socket pair that transmits JSON text frames only — sending anything
@@ -50,6 +51,7 @@ function createSocketPair(): [FakeSocket, FakeSocket] {
     hangUp: () => {
       fire(mine, "close")
     },
+    listenerCount: (type: string) => listenersFor(mine, type).length,
     open: () => {
       state[mine] = 1
       fire(mine, "open")
@@ -57,8 +59,8 @@ function createSocketPair(): [FakeSocket, FakeSocket] {
     get readyState() {
       return state[mine]
     },
-    removeEventListener: (_type, listener) => {
-      ends[mine]["message"] = listenersFor(mine, "message").filter((entry) => entry !== listener)
+    removeEventListener: (type: string, listener: MessageListener) => {
+      ends[mine][type] = listenersFor(mine, type).filter((entry) => entry !== listener)
     },
     send: (data) => {
       if (typeof data !== "string") {
@@ -185,5 +187,19 @@ describe("whenOpen", () => {
     socket.hangUp()
 
     await expect(pending).rejects.toThrow("Socket closed before opening")
+  })
+
+  test("detaches its listeners once settled", async () => {
+    const [socket] = createSocketPair()
+
+    const pending = whenOpen(socket)
+    socket.open()
+    await pending
+
+    // A lingering "error" listener would suppress ws's throw-on-unhandled-error
+    // for the socket's whole life; whenOpen must clean up after itself.
+    expect(socket.listenerCount("open")).toBe(0)
+    expect(socket.listenerCount("error")).toBe(0)
+    expect(socket.listenerCount("close")).toBe(0)
   })
 })

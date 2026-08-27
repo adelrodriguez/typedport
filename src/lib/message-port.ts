@@ -209,9 +209,11 @@ export type PortWindowLike = {
  * for an event that already fired and the hand-off would silently never happen.
  *
  * A transferred port is spent, so a reload needs a fresh `MessageChannelMain` and another
- * `sendPort` call (from your own `did-finish-load` handler). Window lifecycle stays the caller's
- * business — pair this with `win.on("closed", () => close(...))` on the `connect` session serving
- * the other end.
+ * `sendPort` call (from your own `did-finish-load` handler). A _failed_ navigation
+ * (`did-fail-load`) also leaves `isLoading()` false, so the port may post to a page that never
+ * arrived and is then spent — treat navigation failure as a reason to rebuild the channel too.
+ * Window lifecycle stays the caller's business — pair this with `win.on("closed", () =>
+ * close(...))` on the `connect` session serving the other end.
  */
 export function sendPort(win: PortWindowLike, port: MainPortLike, type: string): void {
   const { webContents } = win
