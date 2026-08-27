@@ -1,12 +1,12 @@
-import { type ContractTree, isLeaf, type Leaf } from "./contract"
+import { type ContractTree, isChannel, type Channel } from "./contract"
 
-export function flatten(tree: ContractTree, prefix = ""): Record<string, Leaf> {
-  const result: Record<string, Leaf> = {}
+export function flatten(tree: ContractTree, prefix = ""): Record<string, Channel> {
+  const result: Record<string, Channel> = {}
 
   for (const [key, node] of Object.entries(tree)) {
     const path = prefix ? `${prefix}.${key}` : key
 
-    if (isLeaf(node)) {
+    if (isChannel(node)) {
       result[path] = node
     } else {
       Object.assign(result, flatten(node, path))

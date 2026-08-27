@@ -1,18 +1,18 @@
 import type { Router } from "./router"
 import type { Transport } from "./types"
-import { detailOf, TypeportError, type TypeportErrorDetail } from "./error"
+import { detailOf, ChannelError, type ChannelErrorDetail } from "./error"
 
 /**
  * An outcome flattened to a serializable value, so errors survive boundaries that structured-clone
  * or JSON-encode (Electron `invoke`, `postMessage`, HTTP). `detail` is present exactly when the
- * failure was a `TypeportError`, letting `fromWire` rehydrate it — code and fields intact — on the
+ * failure was a `ChannelError`, letting `fromWire` rehydrate it — code and fields intact — on the
  * other side.
  */
 export type WireResult =
   | { ok: true; result: unknown }
   | {
       ok: false
-      error: { detail?: TypeportErrorDetail; message: string; name: string }
+      error: { detail?: ChannelErrorDetail; message: string; name: string }
     }
 
 /**
@@ -30,7 +30,7 @@ export async function toWire(operation: Promise<unknown> | (() => unknown)): Pro
 }
 
 /**
- * Unwraps a `WireResult`: returns the result, or rethrows the failure — with `TypeportError`
+ * Unwraps a `WireResult`: returns the result, or rethrows the failure — with `ChannelError`
  * rehydrated (code and fields intact) so `instanceof` and `code` checks work across the boundary.
  *
  * Takes `unknown` because at a real boundary the value is untrusted: a gateway error page or a
@@ -40,8 +40,8 @@ export async function toWire(operation: Promise<unknown> | (() => unknown)): Pro
 export function fromWire(data: unknown): unknown {
   if (!isEnvelope(data)) {
     // A library-raised failure, so it follows the one rule: it is a
-    // TypeportError, and adapters can branch on its code.
-    throw new TypeportError({ code: "malformed-envelope" })
+    // ChannelError, and adapters can branch on its code.
+    throw new ChannelError({ code: "malformed-envelope" })
   }
 
   if (data.ok) {
@@ -49,7 +49,7 @@ export function fromWire(data: unknown): unknown {
   }
 
   if (data.error.detail) {
-    throw new TypeportError(data.error.detail)
+    throw new ChannelError(data.error.detail)
   }
 
   const error = new Error(data.error.message)
@@ -100,21 +100,43 @@ type PendingEntry = {
  * A pipe is one peer, so `context` is per-connection: whatever identity the edge established (the
  * session, the window) is passed to every dispatch this end serves.
  *
- * Full error fidelity is the point of the protocol: the peer receives every `TypeportError` detail,
+ * Full error fidelity is the point of the protocol: the peer receives every `ChannelError` detail,
  * including server-fault codes like `output-validation`. That makes `connect` a trusted-peer
  * transport (a worker, a MessagePort, your own processes). A peer that should not see server-side
  * detail — a browser talking to a public server — belongs behind an edge that redacts, like the
  * HTTP recipes do.
  *
  * `timeoutMs` bounds each outgoing call; without it a dead peer leaves calls pending forever.
- * `close(reason?)` rejects everything in flight and every future call with a `TypeportError` (code
+ * `close(reason?)` rejects everything in flight and every future call with a `ChannelError` (code
  * `closed`, the reason in `cause`) and stops serving — wire it to whatever liveness signal the pipe
  * has (a window's `closed`, a socket's `close`).
+ *
+ * The wire may be a promise — a port that hasn't been handed over yet, a socket that hasn't opened.
+ * Calls made in the meantime queue (bounded by `timeoutMs`) and flush when it resolves; `close`
+ * before it arrives wins the race, and a rejected wire promise closes the connection with the
+ * rejection as the reason.
  */
 export function connect<Context = void>(
-  wire: Wire,
+  wire: Wire | Promise<Wire>,
   options: { context?: Context; router?: Router<Context>; timeoutMs?: number } = {}
 ): { transport: Transport; close: (reason?: Error) => void } {
+  const source: Wire =
+    "send" in wire
+      ? wire
+      : deferWire(
+          wire,
+          (reason) => {
+            close(reason)
+          },
+          // A queued request whose caller already timed out must not reach the
+          // peer once the wire arrives — the reply would be dropped, but the
+          // peer's resolver would still run. Anything that isn't a request
+          // (responses to calls the peer somehow made this early) still flows.
+          (data) => {
+            const message = data as { kind?: string; id?: number }
+            return message.kind !== "req" || (message.id !== undefined && pending.has(message.id))
+          }
+        )
   const { context, router, timeoutMs } = options
   const dispatch = router?.dispatch as
     | ((path: string, raw: unknown, context?: Context) => Promise<unknown>)
@@ -123,7 +145,7 @@ export function connect<Context = void>(
   let nextId = 0
   let closed: Error | undefined
 
-  const unsubscribe = wire.onMessage((data) => {
+  const unsubscribe = source.onMessage((data) => {
     if (closed || typeof data !== "object" || data === null) {
       return
     }
@@ -154,24 +176,26 @@ export function connect<Context = void>(
     }
   })
 
+  function close(reason?: Error): void {
+    if (closed) {
+      return
+    }
+
+    closed = new ChannelError({ code: "closed" }, { cause: reason })
+
+    if (typeof unsubscribe === "function") {
+      unsubscribe()
+    }
+
+    for (const entry of pending.values()) {
+      entry.fail(closed)
+    }
+
+    pending.clear()
+  }
+
   return {
-    close(reason) {
-      if (closed) {
-        return
-      }
-
-      closed = new TypeportError({ code: "closed" }, { cause: reason })
-
-      if (typeof unsubscribe === "function") {
-        unsubscribe()
-      }
-
-      for (const entry of pending.values()) {
-        entry.fail(closed)
-      }
-
-      pending.clear()
-    },
+    close,
     transport: (path, payload) =>
       new Promise((resolve, reject) => {
         if (closed) {
@@ -186,7 +210,7 @@ export function connect<Context = void>(
             ? undefined
             : setTimeout(() => {
                 pending.delete(id)
-                reject(new TypeportError({ code: "timeout", path, timeoutMs }))
+                reject(new ChannelError({ code: "timeout", path, timeoutMs }))
               }, timeoutMs)
 
         pending.set(id, {
@@ -208,7 +232,7 @@ export function connect<Context = void>(
         })
 
         try {
-          wire.send({ id, kind: "req", path, payload })
+          source.send({ id, kind: "req", path, payload })
         } catch (error) {
           // A synchronously-throwing send (DataCloneError on a non-cloneable
           // payload) rejects the caller; don't leak the pending entry.
@@ -227,11 +251,11 @@ export function connect<Context = void>(
     const result: WireResult = dispatch
       ? // The thunk form lets toWire capture even a synchronously-throwing dispatch.
         await toWire(() => dispatch(message.path, message.payload, context))
-      : { error: serializeError(new TypeportError({ code: "no-router" })), ok: false }
+      : { error: serializeError(new ChannelError({ code: "no-router" })), ok: false }
 
     if (!closed) {
       try {
-        wire.send({ id: message.id, kind: "res", result })
+        source.send({ id: message.id, kind: "res", result })
       } catch {
         // The pipe died between request and reply; `respond` runs unawaited, so
         // swallowing here is what keeps this from becoming an unhandled
@@ -241,8 +265,84 @@ export function connect<Context = void>(
   }
 }
 
+/**
+ * A `Wire` over a wire that hasn't arrived yet: outbound data buffers, the listener attaches on
+ * arrival, and unsubscribing before arrival detaches permanently — so a `close` that wins the race
+ * leaves a late wire untouched. The flush asks `stillWanted` per entry, so a request whose caller
+ * gave up (timed out) while the wire was pending is dropped instead of sent. A rejected promise
+ * reports through `onReject` (connect closes with it); the buffered data is dropped with the
+ * connection, which is what the caller's pending-call rejections already communicate.
+ */
+function deferWire(
+  pending: Promise<Wire>,
+  onReject: (reason: Error) => void,
+  stillWanted: (data: unknown) => boolean
+): Wire {
+  let inner: Wire | undefined
+  let listener: ((data: unknown) => void) | undefined
+  let innerUnsubscribe: (() => void) | undefined = undefined
+  let detached = false
+  const outbox: unknown[] = []
+
+  const adopt = async (): Promise<void> => {
+    const wire = await pending
+
+    if (detached) {
+      return
+    }
+
+    inner = wire
+
+    if (listener) {
+      innerUnsubscribe = subscribe(wire, listener)
+    }
+
+    for (const data of outbox.splice(0)) {
+      if (stillWanted(data)) {
+        wire.send(data)
+      }
+    }
+  }
+
+  adopt().catch((error: unknown) => {
+    onReject(error instanceof Error ? error : new Error(String(error)))
+  })
+
+  return {
+    onMessage: (incoming) => {
+      listener = incoming
+
+      if (inner) {
+        innerUnsubscribe = subscribe(inner, incoming)
+      }
+
+      return () => {
+        detached = true
+
+        if (typeof innerUnsubscribe === "function") {
+          innerUnsubscribe()
+        }
+      }
+    },
+    send: (data) => {
+      if (inner) {
+        inner.send(data)
+      } else {
+        outbox.push(data)
+      }
+    },
+  }
+}
+
+// Normalizes Wire.onMessage's void-or-unsubscribe return to something storable.
+function subscribe(wire: Wire, listener: (data: unknown) => void): (() => void) | undefined {
+  const unsubscribe = wire.onMessage(listener)
+
+  return typeof unsubscribe === "function" ? unsubscribe : undefined
+}
+
 function serializeError(error: unknown): Exclude<WireResult, { ok: true }>["error"] {
-  if (error instanceof TypeportError) {
+  if (error instanceof ChannelError) {
     return { detail: detailOf(error), message: error.message, name: error.name }
   }
 

@@ -1,11 +1,11 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 /**
- * The discriminated payload of a `TypeportError`, one variant per failure the library itself can
+ * The discriminated payload of a `ChannelError`, one variant per failure the library itself can
  * raise. Serializable by construction: the wire envelope ships it across boundaries verbatim and
  * rehydrates it on the other side.
  */
-export type TypeportErrorDetail =
+export type ChannelErrorDetail =
   | { code: "closed" }
   | { code: "malformed-envelope" }
   | { code: "no-router" }
@@ -14,7 +14,7 @@ export type TypeportErrorDetail =
   | { code: "unknown-channel"; path: string }
   | { code: "validation"; issues: readonly StandardSchemaV1.Issue[] }
 
-function messageFor(detail: TypeportErrorDetail): string {
+function messageFor(detail: ChannelErrorDetail): string {
   switch (detail.code) {
     case "closed":
       return "Wire closed"
@@ -32,11 +32,11 @@ function messageFor(detail: TypeportErrorDetail): string {
   }
 }
 
-class TypeportBaseError extends Error {
-  constructor(detail: TypeportErrorDetail, options?: ErrorOptions) {
+class ChannelBaseError extends Error {
+  constructor(detail: ChannelErrorDetail, options?: ErrorOptions) {
     super(messageFor(detail), options)
-    // oxlint-disable-next-line custom-error-definition -- instances present under the public name, TypeportError
-    this.name = "TypeportError"
+    // oxlint-disable-next-line custom-error-definition -- instances present under the public name, ChannelError
+    this.name = "ChannelError"
     Object.assign(this, detail)
   }
 }
@@ -55,23 +55,23 @@ class TypeportBaseError extends Error {
  * - `malformed-envelope` — `fromWire` received a value that is not a `WireResult` (a gateway error
  *   page, a proxy 502)
  *
- * `instanceof TypeportError` then `error.code === "..."` narrows the fields. Anything a resolver
- * throws is not wrapped: an error that is not a `TypeportError` came from application code.
+ * `instanceof ChannelError` then `error.code === "..."` narrows the fields. Anything a resolver
+ * throws is not wrapped: an error that is not a `ChannelError` came from application code.
  */
-export type TypeportError = TypeportBaseError & TypeportErrorDetail
+export type ChannelError = ChannelBaseError & ChannelErrorDetail
 
 // The base class assigns the detail's fields onto the instance; this cast is what lets the type
 // system see them, making `code` narrow the per-code fields after an `instanceof` check.
-export const TypeportError = TypeportBaseError as unknown as new (
-  detail: TypeportErrorDetail,
+export const ChannelError = ChannelBaseError as unknown as new (
+  detail: ChannelErrorDetail,
   options?: ErrorOptions
-) => TypeportError
+) => ChannelError
 
 /**
  * Recovers the serializable detail from an instance — the wire envelope's half of the round trip
- * `new TypeportError(detailOf(error))`.
+ * `new ChannelError(detailOf(error))`.
  */
-export function detailOf(error: TypeportError): TypeportErrorDetail {
+export function detailOf(error: ChannelError): ChannelErrorDetail {
   switch (error.code) {
     case "closed":
       return { code: "closed" }

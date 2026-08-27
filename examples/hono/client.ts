@@ -2,7 +2,7 @@
 // The client side of the HTTP recipe: a fetch transport wrapped in fromWire.
 // The transport declares per-call options — the contract knows nothing about
 // HTTP, but a call site can still pick GET or attach an AbortSignal.
-import { createClient, TypeportError } from "../../src/index.ts"
+import { createClient, ChannelError } from "../../src/index.ts"
 import { fromWire } from "../../src/wire.ts"
 import { contract } from "./contract.ts"
 
@@ -48,7 +48,7 @@ await api.telemetry.pageView({ route: "/home" }) // one-way
 
 // The client validates before sending — this never reaches the network:
 await api.todos.create({ title: "" }).catch((error: unknown) => {
-  if (error instanceof TypeportError && error.code === "validation") {
+  if (error instanceof ChannelError && error.code === "validation") {
     console.log("rejected at the call site:", error.issues[0]?.message)
   }
 })

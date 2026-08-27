@@ -1,8 +1,8 @@
 import { describe, expect, test, vi } from "vitest"
 import * as z from "zod"
 import { createClient } from "../client"
-import { defineContract, event } from "../contract"
-import { TypeportError } from "../error"
+import { defineContract, channel } from "../contract"
+import { ChannelError } from "../error"
 import { createRouter } from "../router"
 import { connect, fromWire, toWire, type Wire } from "../wire"
 
@@ -33,13 +33,13 @@ function createWirePair(): [Wire, Wire] {
 
 const pullContract = defineContract({
   math: {
-    add: event({ input: z.object({ a: z.number(), b: z.number() }), output: z.number() }),
+    add: channel({ input: z.object({ a: z.number(), b: z.number() }), output: z.number() }),
   },
 })
 
 const pushContract = defineContract({
-  notify: event(z.object({ message: z.string() })),
-  ping: event({ input: z.void(), output: z.literal("pong") }),
+  notify: channel(z.object({ message: z.string() })),
+  ping: channel({ input: z.void(), output: z.literal("pong") }),
 })
 
 function createConnectedPeers() {
@@ -81,12 +81,12 @@ describe("connect", () => {
       .catch((error: unknown) => error)
 
     // Thrown by the remote router, yet instanceof and code checks work on this side.
-    expect(error).toBeInstanceOf(TypeportError)
+    expect(error).toBeInstanceOf(ChannelError)
 
-    const typedportError = error as Extract<TypeportError, { code: "validation" }>
+    const channelError = error as Extract<ChannelError, { code: "validation" }>
 
-    expect(typedportError.code).toBe("validation")
-    expect(typedportError.issues.length).toBeGreaterThan(0)
+    expect(channelError.code).toBe("validation")
+    expect(channelError.issues.length).toBeGreaterThan(0)
   })
 
   test("carries resolver crashes as plain errors", async () => {
@@ -104,7 +104,7 @@ describe("connect", () => {
     )
 
     expect(error).toBeInstanceOf(Error)
-    expect(error).not.toBeInstanceOf(TypeportError)
+    expect(error).not.toBeInstanceOf(ChannelError)
     expect((error as Error).message).toBe("resolver exploded")
   })
 
@@ -118,9 +118,9 @@ describe("connect", () => {
     )
 
     // Raised on the peer, rehydrated here with its code intact.
-    expect(error).toBeInstanceOf(TypeportError)
-    expect((error as TypeportError).code).toBe("no-router")
-    expect((error as TypeportError).message).toBe("This end does not serve requests")
+    expect(error).toBeInstanceOf(ChannelError)
+    expect((error as ChannelError).code).toBe("no-router")
+    expect((error as ChannelError).message).toBe("This end does not serve requests")
   })
 
   test("times out calls the peer never answers", async () => {
@@ -131,13 +131,13 @@ describe("connect", () => {
       (error: unknown) => error
     )
 
-    expect(error).toBeInstanceOf(TypeportError)
+    expect(error).toBeInstanceOf(ChannelError)
 
-    const typedportError = error as Extract<TypeportError, { code: "timeout" }>
+    const channelError = error as Extract<ChannelError, { code: "timeout" }>
 
-    expect(typedportError.code).toBe("timeout")
-    expect(typedportError.path).toBe("math.add")
-    expect(typedportError.timeoutMs).toBe(20)
+    expect(channelError.code).toBe("timeout")
+    expect(channelError.path).toBe("math.add")
+    expect(channelError.timeoutMs).toBe(20)
   })
 
   test("passes per-connection context to the served router", async () => {
@@ -171,9 +171,9 @@ describe("connect", () => {
     )
 
     for (const rejection of [error, late]) {
-      expect(rejection).toBeInstanceOf(TypeportError)
-      expect((rejection as TypeportError).code).toBe("closed")
-      expect(((rejection as TypeportError).cause as Error).message).toBe("window closed")
+      expect(rejection).toBeInstanceOf(ChannelError)
+      expect((rejection as ChannelError).code).toBe("closed")
+      expect(((rejection as ChannelError).cause as Error).message).toBe("window closed")
     }
   })
 
@@ -229,8 +229,8 @@ describe("toWire / fromWire", () => {
       }
     })()
 
-    expect(error).toBeInstanceOf(TypeportError)
-    expect((error as TypeportError).code).toBe("validation")
+    expect(error).toBeInstanceOf(ChannelError)
+    expect((error as ChannelError).code).toBe("validation")
   })
 
   test("rejects values that are not envelopes with code malformed-envelope", () => {
@@ -249,9 +249,9 @@ describe("toWire / fromWire", () => {
         }
       })()
 
-      // Library-raised, so it follows the one rule: TypeportError with a code.
-      expect(error).toBeInstanceOf(TypeportError)
-      expect((error as TypeportError).code).toBe("malformed-envelope")
+      // Library-raised, so it follows the one rule: ChannelError with a code.
+      expect(error).toBeInstanceOf(ChannelError)
+      expect((error as ChannelError).code).toBe("malformed-envelope")
     }
   })
 
@@ -269,5 +269,111 @@ describe("toWire / fromWire", () => {
       error: { message: "sync explosion", name: "Error" },
       ok: false,
     })
+  })
+})
+
+describe("connect over a pending wire", () => {
+  test("queues calls until the wire arrives, then flushes them", async () => {
+    const [serverWire, clientWire] = createWirePair()
+
+    const serverRouter = createRouter(pullContract, {
+      "math.add": ({ a, b }) => a + b,
+    })
+    connect(serverWire, { router: serverRouter })
+
+    const { promise: pending, resolve: deliver } = Promise.withResolvers<Wire>()
+
+    const client = connect(pending)
+    const api = createClient(pullContract, client.transport)
+
+    // Called before any wire exists; must settle once one shows up.
+    const result = api.math.add({ a: 2, b: 3 })
+
+    deliver(clientWire)
+
+    await expect(result).resolves.toBe(5)
+  })
+
+  test("close before the wire arrives wins the race", async () => {
+    const { promise: pending, resolve: deliver } = Promise.withResolvers<Wire>()
+
+    const client = connect(pending)
+    const api = createClient(pullContract, client.transport)
+
+    const result = api.math.add({ a: 2, b: 3 })
+
+    client.close(new Error("gave up"))
+
+    const error = await result.catch((error: unknown) => error)
+
+    expect(error).toBeInstanceOf(ChannelError)
+    expect((error as ChannelError).code).toBe("closed")
+    expect((error as ChannelError).cause).toBeInstanceOf(Error)
+
+    // A late wire must stay untouched: no listener attached, nothing buffered leaked onto it.
+    const attached: unknown[] = []
+    const sent: unknown[] = []
+    deliver({
+      onMessage: (listener) => {
+        attached.push(listener)
+      },
+      send: (data) => {
+        sent.push(data)
+      },
+    })
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0)
+    })
+
+    expect(attached).toEqual([])
+    expect(sent).toEqual([])
+  })
+
+  test("does not flush requests whose callers already timed out", async () => {
+    const { promise: pending, resolve: deliver } = Promise.withResolvers<Wire>()
+
+    const client = connect(pending, { timeoutMs: 5 })
+    const api = createClient(pullContract, client.transport)
+
+    // Times out while the wire is still pending; the queued frame must die with it.
+    await expect(api.math.add({ a: 2, b: 3 })).rejects.toMatchObject({ code: "timeout" })
+
+    const attached: unknown[] = []
+    const sent: unknown[] = []
+    deliver({
+      onMessage: (listener) => {
+        attached.push(listener)
+      },
+      send: (data) => {
+        sent.push(data)
+      },
+    })
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0)
+    })
+
+    // The connection is still open (the listener attaches), but the peer must
+    // not run a resolver for a call nobody is waiting on.
+    expect(attached).toHaveLength(1)
+    expect(sent).toEqual([])
+  })
+
+  test("a rejected wire promise closes the connection with the reason as cause", async () => {
+    const reason = new Error("no port for you")
+    const client = connect(Promise.reject(reason))
+    const api = createClient(pullContract, client.transport)
+
+    // The rejection lands in a microtask; afterwards every call is a fast failure.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0)
+    })
+
+    const error = await api.math.add({ a: 1, b: 1 }).catch((error: unknown) => error)
+
+    expect(error).toBeInstanceOf(ChannelError)
+    expect((error as ChannelError).code).toBe("closed")
+    expect((error as ChannelError).cause).toBe(reason)
   })
 })

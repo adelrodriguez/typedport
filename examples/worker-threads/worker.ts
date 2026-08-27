@@ -2,29 +2,19 @@
 // A browser Web Worker is the same shape — swap parentPort for self.
 import { parentPort } from "node:worker_threads"
 import { createRouter } from "../../src/index.ts"
-import { connect, type Wire } from "../../src/wire.ts"
+import { connect } from "../../src/wire.ts"
+import { nodePort } from "../../src/wire/message-port.ts"
 import { contract } from "./contract.ts"
 
 if (!parentPort) {
   throw new Error("This module must run inside a worker thread")
 }
 
-const port = parentPort
-
 const router = createRouter(contract, {
   "primes.count": ({ below }) => countPrimes(below),
 })
 
-const wire: Wire = {
-  onMessage: (listener) => {
-    port.on("message", listener)
-  },
-  send: (data) => {
-    port.postMessage(data)
-  },
-}
-
-connect(wire, { router })
+connect(nodePort(parentPort), { router })
 
 function countPrimes(below: number): number {
   if (below < 3) {

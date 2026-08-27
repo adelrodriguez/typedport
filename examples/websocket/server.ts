@@ -1,10 +1,11 @@
 /* oxlint-disable no-console -- runnable example */
 // One connect() per socket: each session serves the pull contract and gets a
 // typed push client for the peer. Messages are JSON — the wire envelope keeps
-// TypeportError intact across it.
+// ChannelError intact across it.
 import { WebSocketServer } from "ws"
 import { createClient, createRouter, type InferClient } from "../../src/index.ts"
-import { connect, type Wire } from "../../src/wire.ts"
+import { connect } from "../../src/wire.ts"
+import { webSocket } from "../../src/wire/web-socket.ts"
 import { contract, pushContract } from "./contract.ts"
 
 const router = createRouter(contract, {
@@ -16,19 +17,9 @@ const clients = new Set<InferClient<typeof pushContract>>()
 const server = new WebSocketServer({ port: 4321 })
 
 server.on("connection", (socket) => {
-  const wire: Wire = {
-    onMessage: (listener) => {
-      socket.on("message", (raw) => {
-        // Text frames arrive as a Buffer.
-        listener(JSON.parse((raw as Buffer).toString("utf8")))
-      })
-    },
-    send: (data) => {
-      socket.send(JSON.stringify(data))
-    },
-  }
-
-  const { close, transport } = connect(wire, { router, timeoutMs: 5000 })
+  // ws sockets speak the browser-compatible listener API, so the same wire
+  // wrapper covers both sides; it parses ws's Buffer frames too.
+  const { close, transport } = connect(webSocket(socket), { router, timeoutMs: 5000 })
   const push = createClient(pushContract, transport)
 
   clients.add(push)

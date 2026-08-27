@@ -1,19 +1,19 @@
 import { describe, expect, test } from "vitest"
 import * as z from "zod"
 import { createClient } from "../client"
-import { defineContract, event } from "../contract"
+import { defineContract, channel } from "../contract"
 import { createRouter } from "../router"
 
 const LocalTextFile = z.object({ contents: z.string(), path: z.string() })
 
 const contract = defineContract({
   localFiles: {
-    open: event({ input: z.void(), output: LocalTextFile.nullable() }),
-    save: event(LocalTextFile),
+    open: channel({ input: z.void(), output: LocalTextFile.nullable() }),
+    save: channel(LocalTextFile),
   },
   stripe: {
     checkout: {
-      created: event(z.object({ id: z.string() })),
+      created: channel(z.object({ id: z.string() })),
     },
   },
 })
@@ -91,13 +91,55 @@ describe("createClient", () => {
 
     await expect(tree.localFiles.rename()).rejects.toThrow('Unknown channel: "localFiles.rename"')
   })
+
+  test("returns the transport's value as-is — output is not validated client-side", async () => {
+    const client = createClient(contract, () => "definitely not a LocalTextFile")
+
+    // The return type is a claim about the peer, not a guarantee: only the
+    // router parses against `output`.
+    await expect(client.localFiles.open()).resolves.toBe("definitely not a LocalTextFile")
+  })
+
+  test("is not thenable: awaiting a branch returns it without dispatching", async () => {
+    const calls: string[] = []
+    const client = createClient(contract, (path) => {
+      calls.push(path)
+      return null
+    })
+
+    expect((client.localFiles as { then?: unknown }).then).toBeUndefined()
+
+    // Promise.resolve probes `.then` exactly as `await client.localFiles`
+    // would — which used to dispatch "localFiles.then" and never settle.
+    const branch = await Promise.resolve(client.localFiles)
+
+    expect(typeof branch.open).toBe("function")
+    expect(calls).toEqual([])
+  })
+
+  test("JSON.stringify does not probe the tree through toJSON", () => {
+    const calls: string[] = []
+    const client = createClient(contract, (path) => {
+      calls.push(path)
+      return null
+    })
+
+    // This is the assertion that pins the guard: without it the proxy returns
+    // a callable node here, JSON.stringify invokes it, and the dispatch fails
+    // out-of-band as an unhandled rejection while `calls` stays empty.
+    expect((client.localFiles as { toJSON?: unknown }).toJSON).toBeUndefined()
+
+    JSON.stringify(client.localFiles)
+
+    expect(calls).toEqual([])
+  })
 })
 
 describe("per-call options", () => {
   const optionsContract = defineContract({
-    greet: event({ input: z.object({ name: z.string() }), output: z.string() }),
+    greet: channel({ input: z.object({ name: z.string() }), output: z.string() }),
     misc: {
-      ping: event({ input: z.void(), output: z.string() }),
+      ping: channel({ input: z.void(), output: z.string() }),
     },
   })
 
@@ -140,5 +182,19 @@ describe("per-call options", () => {
     await client.misc.$with({ b: 4 }).ping()
 
     expect(seen).toEqual([{ a: 1, b: 2 }, { a: 3, b: 1 }, { b: 4 }])
+  })
+
+  test("non-record options replace bound options instead of merging", async () => {
+    const seen: unknown[] = []
+    const client = createClient(optionsContract, (_path, _payload, options?: string) => {
+      seen.push(options)
+      return "ok"
+    })
+
+    await client.greet({ name: "Ada" }, "per-call")
+    await client.$with("bound").misc.ping()
+    await client.$with("bound").greet({ name: "Ada" }, "per-call")
+
+    expect(seen).toEqual(["per-call", "bound", "per-call"])
   })
 })

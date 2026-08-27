@@ -1,9 +1,9 @@
 import * as z from "zod"
-import { defineContract, event } from "../../src/index.ts"
+import { defineContract, channel } from "../../src/index.ts"
 
 export const contract = defineContract({
   primes: {
-    count: event({
+    count: channel({
       input: z.object({ below: z.number().int().positive() }),
       output: z.number(),
     }),
