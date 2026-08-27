@@ -78,6 +78,7 @@
     "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^4.0.0",
     "adamantite": "^0.35.0",
+    "capnweb": "^0.12.0",
     "hono": "^4.13.2",
     "knip": "^6.32.2",
     "oxfmt": "^0.63.0",
