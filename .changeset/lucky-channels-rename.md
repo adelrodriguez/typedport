@@ -11,4 +11,4 @@ Breaking API sweep ahead of the freeze (0.x, so breaking changes ride minor bump
 
 Housekeeping: the package itself was renamed from `typeport` to `typedport` in an earlier release without a changeset — this entry records it.
 
-Migrating: rename `event(` → `channel(`, `TypeportError` → `ChannelError`, `Leaf` → `Channel`, and `isLeaf` → `isChannel`; nothing else changes.
+Migrating: rename `event(` → `channel(`, `TypeportError` → `ChannelError`, `Leaf` → `Channel`, and `isLeaf` → `isChannel`. Also rename any contract key called `then` or `toJSON` (`defineContract` now rejects both), and update any hand-built leaf from `_kind: "event"` to `_kind: "channel"`.

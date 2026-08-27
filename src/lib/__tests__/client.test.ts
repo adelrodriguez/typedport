@@ -124,6 +124,11 @@ describe("createClient", () => {
       return null
     })
 
+    // This is the assertion that pins the guard: without it the proxy returns
+    // a callable node here, JSON.stringify invokes it, and the dispatch fails
+    // out-of-band as an unhandled rejection while `calls` stays empty.
+    expect((client.localFiles as { toJSON?: unknown }).toJSON).toBeUndefined()
+
     JSON.stringify(client.localFiles)
 
     expect(calls).toEqual([])
