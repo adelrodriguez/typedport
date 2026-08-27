@@ -8,6 +8,13 @@ export {
   type OneWayContract,
 } from "./lib/contract"
 export { ChannelError, type ChannelErrorDetail } from "./lib/error"
+export {
+  implement,
+  isFragment,
+  type Fragment,
+  type FragmentTree,
+  type Implementer,
+} from "./lib/implement"
 export { createRouter, type Router } from "./lib/router"
 export { parseWith } from "./lib/standard"
 export type { InferClient, InferResolvers, Transport } from "./lib/types"

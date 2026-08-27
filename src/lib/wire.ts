@@ -110,11 +110,22 @@ type PendingEntry = {
  * `close(reason?)` rejects everything in flight and every future call with a `ChannelError` (code
  * `closed`, the reason in `cause`) and stops serving — wire it to whatever liveness signal the pipe
  * has (a window's `closed`, a socket's `close`).
+ *
+ * The wire may be a promise — a port that hasn't been handed over yet, a socket that hasn't opened.
+ * Calls made in the meantime queue (bounded by `timeoutMs`) and flush when it resolves; `close`
+ * before it arrives wins the race, and a rejected wire promise closes the connection with the
+ * rejection as the reason.
  */
 export function connect<Context = void>(
-  wire: Wire,
+  wire: Wire | Promise<Wire>,
   options: { context?: Context; router?: Router<Context>; timeoutMs?: number } = {}
 ): { transport: Transport; close: (reason?: Error) => void } {
+  const source: Wire =
+    "send" in wire
+      ? wire
+      : deferWire(wire, (reason) => {
+          close(reason)
+        })
   const { context, router, timeoutMs } = options
   const dispatch = router?.dispatch as
     | ((path: string, raw: unknown, context?: Context) => Promise<unknown>)
@@ -123,7 +134,7 @@ export function connect<Context = void>(
   let nextId = 0
   let closed: Error | undefined
 
-  const unsubscribe = wire.onMessage((data) => {
+  const unsubscribe = source.onMessage((data) => {
     if (closed || typeof data !== "object" || data === null) {
       return
     }
@@ -154,24 +165,26 @@ export function connect<Context = void>(
     }
   })
 
+  function close(reason?: Error): void {
+    if (closed) {
+      return
+    }
+
+    closed = new ChannelError({ code: "closed" }, { cause: reason })
+
+    if (typeof unsubscribe === "function") {
+      unsubscribe()
+    }
+
+    for (const entry of pending.values()) {
+      entry.fail(closed)
+    }
+
+    pending.clear()
+  }
+
   return {
-    close(reason) {
-      if (closed) {
-        return
-      }
-
-      closed = new ChannelError({ code: "closed" }, { cause: reason })
-
-      if (typeof unsubscribe === "function") {
-        unsubscribe()
-      }
-
-      for (const entry of pending.values()) {
-        entry.fail(closed)
-      }
-
-      pending.clear()
-    },
+    close,
     transport: (path, payload) =>
       new Promise((resolve, reject) => {
         if (closed) {
@@ -208,7 +221,7 @@ export function connect<Context = void>(
         })
 
         try {
-          wire.send({ id, kind: "req", path, payload })
+          source.send({ id, kind: "req", path, payload })
         } catch (error) {
           // A synchronously-throwing send (DataCloneError on a non-cloneable
           // payload) rejects the caller; don't leak the pending entry.
@@ -231,7 +244,7 @@ export function connect<Context = void>(
 
     if (!closed) {
       try {
-        wire.send({ id: message.id, kind: "res", result })
+        source.send({ id: message.id, kind: "res", result })
       } catch {
         // The pipe died between request and reply; `respond` runs unawaited, so
         // swallowing here is what keeps this from becoming an unhandled
@@ -239,6 +252,75 @@ export function connect<Context = void>(
       }
     }
   }
+}
+
+/**
+ * A `Wire` over a wire that hasn't arrived yet: outbound data buffers, the listener attaches on
+ * arrival, and unsubscribing before arrival detaches permanently — so a `close` that wins the race
+ * leaves a late wire untouched. A rejected promise reports through `onReject` (connect closes with
+ * it); the buffered data is dropped with the connection, which is what the caller's pending-call
+ * rejections already communicate.
+ */
+function deferWire(pending: Promise<Wire>, onReject: (reason: Error) => void): Wire {
+  let inner: Wire | undefined
+  let listener: ((data: unknown) => void) | undefined
+  let innerUnsubscribe: (() => void) | undefined = undefined
+  let detached = false
+  const outbox: unknown[] = []
+
+  const adopt = async (): Promise<void> => {
+    const wire = await pending
+
+    if (detached) {
+      return
+    }
+
+    inner = wire
+
+    if (listener) {
+      innerUnsubscribe = subscribe(wire, listener)
+    }
+
+    for (const data of outbox.splice(0)) {
+      wire.send(data)
+    }
+  }
+
+  adopt().catch((error: unknown) => {
+    onReject(error instanceof Error ? error : new Error(String(error)))
+  })
+
+  return {
+    onMessage: (incoming) => {
+      listener = incoming
+
+      if (inner) {
+        innerUnsubscribe = subscribe(inner, incoming)
+      }
+
+      return () => {
+        detached = true
+
+        if (typeof innerUnsubscribe === "function") {
+          innerUnsubscribe()
+        }
+      }
+    },
+    send: (data) => {
+      if (inner) {
+        inner.send(data)
+      } else {
+        outbox.push(data)
+      }
+    },
+  }
+}
+
+// Normalizes Wire.onMessage's void-or-unsubscribe return to something storable.
+function subscribe(wire: Wire, listener: (data: unknown) => void): (() => void) | undefined {
+  const unsubscribe = wire.onMessage(listener)
+
+  return typeof unsubscribe === "function" ? unsubscribe : undefined
 }
 
 function serializeError(error: unknown): Exclude<WireResult, { ok: true }>["error"] {

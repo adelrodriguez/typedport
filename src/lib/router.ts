@@ -1,6 +1,8 @@
 import type { ContractTree } from "./contract"
+import type { ContextOfHandlers, FragmentTree } from "./implement"
 import type { InferResolvers } from "./types"
 import { ChannelError } from "./error"
+import { flattenFragments } from "./implement"
 import { parseWith } from "./standard"
 import { flatten } from "./utils"
 
@@ -34,17 +36,41 @@ export type Router<Context = void> = {
 }
 
 /**
- * Builds the validating dispatcher for a contract. Declare a context type explicitly when the edge
- * supplies one: `createRouter<typeof contract, Session>(contract, resolvers)`.
+ * Builds the validating dispatcher for a contract, from either resolver shape:
+ *
+ * - A **handler tree** of `implement()` fragments mirroring the contract — a namespace import of a
+ *   one-file-per-branch handler module already has the shape (`createRouter(contract, { notes,
+ *   ping })`). A missing leaf is a missing property, a fragment in the wrong slot is a path-brand
+ *   mismatch, and the context type is inferred from the fragments — it is only ever written at
+ *   `implement(contract).$context<Session>()`.
+ * - A **flat map** keyed by dotted path — the right tool at small sizes. Declare a context type
+ *   explicitly when the edge supplies one: `createRouter<typeof contract, Session>(contract,
+ *   resolvers)`.
  */
-export function createRouter<Tree extends ContractTree, Context = void>(
-  contract: Tree,
-  resolvers: InferResolvers<Tree, Context>
-): Router<Context> {
-  const leaves = flatten(contract)
-  const resolverMap = resolvers as Record<string, (input: unknown, context?: Context) => unknown>
+type CreateRouter = {
+  <Tree extends ContractTree, Handlers extends object>(
+    contract: Tree,
+    handlers: Handlers & FragmentTree<Tree, ContextOfHandlers<Handlers>>
+  ): Router<ContextOfHandlers<Handlers>>
+  <Tree extends ContractTree, Context = void>(
+    contract: Tree,
+    resolvers: InferResolvers<Tree, Context>
+  ): Router<Context>
+}
 
-  const dispatch = async (path: string, raw: unknown, context?: Context): Promise<unknown> => {
+// Typed as a callable interface, not overload declarations: checking the implementation against
+// the tree overload instantiates FragmentTree with the bare ContractTree constraint, whose index
+// signature recurses without terminating (TS2589). Concrete contracts are finite, so call sites
+// are unaffected; the cast stands in for the compatibility check.
+export const createRouter: CreateRouter = buildRouter as CreateRouter
+
+function buildRouter(contract: ContractTree, resolvers: object): Router<never> {
+  const leaves = flatten(contract)
+  const resolverMap = (
+    isHandlerTree(resolvers) ? flattenFragments(contract, resolvers) : resolvers
+  ) as Record<string, (input: unknown, context?: unknown) => unknown>
+
+  const dispatch = async (path: string, raw: unknown, context?: unknown): Promise<unknown> => {
     const leaf = leaves[path]
     const resolver = resolverMap[path]
 
@@ -75,4 +101,11 @@ export function createRouter<Tree extends ContractTree, Context = void>(
   }
 
   return { channels: Object.keys(leaves), dispatch }
+}
+
+// A flat map's values are all resolver functions; a handler tree's top level holds fragments and
+// branch objects. One non-function value is therefore a reliable discriminant between the two
+// `createRouter` shapes.
+function isHandlerTree(resolvers: object): resolvers is Record<string, unknown> {
+  return Object.values(resolvers).some((value) => typeof value !== "function")
 }

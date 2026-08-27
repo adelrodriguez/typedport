@@ -9,7 +9,7 @@ export default defineConfig({
     onlyImport: Object.keys(packageJson.dependencies),
   },
   dts: true,
-  entry: ["src/index.ts", "src/wire.ts"],
+  entry: ["src/index.ts", "src/wire.ts", "src/wire/message-port.ts", "src/wire/web-socket.ts"],
   fixedExtension: false,
   sourcemap: true,
 })

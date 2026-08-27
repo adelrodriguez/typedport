@@ -271,3 +271,79 @@ describe("toWire / fromWire", () => {
     })
   })
 })
+
+describe("connect over a pending wire", () => {
+  test("queues calls until the wire arrives, then flushes them", async () => {
+    const [serverWire, clientWire] = createWirePair()
+
+    const serverRouter = createRouter(pullContract, {
+      "math.add": ({ a, b }) => a + b,
+    })
+    connect(serverWire, { router: serverRouter })
+
+    const { promise: pending, resolve: deliver } = Promise.withResolvers<Wire>()
+
+    const client = connect(pending)
+    const api = createClient(pullContract, client.transport)
+
+    // Called before any wire exists; must settle once one shows up.
+    const result = api.math.add({ a: 2, b: 3 })
+
+    deliver(clientWire)
+
+    await expect(result).resolves.toBe(5)
+  })
+
+  test("close before the wire arrives wins the race", async () => {
+    const { promise: pending, resolve: deliver } = Promise.withResolvers<Wire>()
+
+    const client = connect(pending)
+    const api = createClient(pullContract, client.transport)
+
+    const result = api.math.add({ a: 2, b: 3 })
+
+    client.close(new Error("gave up"))
+
+    const error = await result.catch((error: unknown) => error)
+
+    expect(error).toBeInstanceOf(ChannelError)
+    expect((error as ChannelError).code).toBe("closed")
+    expect((error as ChannelError).cause).toBeInstanceOf(Error)
+
+    // A late wire must stay untouched: no listener attached, nothing buffered leaked onto it.
+    const attached: unknown[] = []
+    const sent: unknown[] = []
+    deliver({
+      onMessage: (listener) => {
+        attached.push(listener)
+      },
+      send: (data) => {
+        sent.push(data)
+      },
+    })
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0)
+    })
+
+    expect(attached).toEqual([])
+    expect(sent).toEqual([])
+  })
+
+  test("a rejected wire promise closes the connection with the reason as cause", async () => {
+    const reason = new Error("no port for you")
+    const client = connect(Promise.reject(reason))
+    const api = createClient(pullContract, client.transport)
+
+    // The rejection lands in a microtask; afterwards every call is a fast failure.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0)
+    })
+
+    const error = await api.math.add({ a: 1, b: 1 }).catch((error: unknown) => error)
+
+    expect(error).toBeInstanceOf(ChannelError)
+    expect((error as ChannelError).code).toBe("closed")
+    expect((error as ChannelError).cause).toBe(reason)
+  })
+})

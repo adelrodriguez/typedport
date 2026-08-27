@@ -41,6 +41,16 @@
       "types": "./dist/wire.d.ts",
       "import": "./dist/wire.js",
       "default": "./dist/wire.js"
+    },
+    "./wire/message-port": {
+      "types": "./dist/wire/message-port.d.ts",
+      "import": "./dist/wire/message-port.js",
+      "default": "./dist/wire/message-port.js"
+    },
+    "./wire/web-socket": {
+      "types": "./dist/wire/web-socket.d.ts",
+      "import": "./dist/wire/web-socket.js",
+      "default": "./dist/wire/web-socket.js"
     }
   },
   "scripts": {
