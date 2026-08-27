@@ -20,7 +20,9 @@ export type MainPortLike = {
   start(): void
 }
 
-/** Wraps an Electron `MessagePortMain` (main or utility process) as a `Wire`. */
+/**
+ * Wraps an Electron `MessagePortMain` (main or utility process) as a `Wire`.
+ */
 export function mainPort(port: MainPortLike): Wire {
   return {
     onMessage: (listener) => {
@@ -42,7 +44,9 @@ export function mainPort(port: MainPortLike): Wire {
   }
 }
 
-/** The shape of a DOM `MessagePort` — renderers, iframes, web workers. */
+/**
+ * The shape of a DOM `MessagePort` — renderers, iframes, web workers.
+ */
 export type DomPortLike = {
   postMessage(message: unknown): void
   addEventListener(type: "message", listener: (event: { data: unknown }) => void): void
@@ -50,7 +54,9 @@ export type DomPortLike = {
   start(): void
 }
 
-/** Wraps a DOM `MessagePort` as a `Wire`. */
+/**
+ * Wraps a DOM `MessagePort` as a `Wire`.
+ */
 export function domPort(port: DomPortLike): Wire {
   return {
     onMessage: (listener) => {
@@ -82,7 +88,9 @@ export type NodePortLike = {
   removeListener(event: "message", listener: (value: unknown) => void): unknown
 }
 
-/** Wraps a `node:worker_threads` port, `Worker`, or `parentPort` as a `Wire`. */
+/**
+ * Wraps a `node:worker_threads` port, `Worker`, or `parentPort` as a `Wire`.
+ */
 export function nodePort(port: NodePortLike): Wire {
   return {
     onMessage: (listener) => {
@@ -107,7 +115,9 @@ export function nodePort(port: NodePortLike): Wire {
 
 type PortMessageEvent = { data: unknown; ports: readonly DomPortLike[]; source: unknown }
 
-/** The slice of a DOM `window` the hand-off touches. */
+/**
+ * The slice of a DOM `window` the hand-off touches.
+ */
 export type MessageWindowLike = {
   addEventListener(type: "message", listener: (event: PortMessageEvent) => void): void
   removeEventListener(type: "message", listener: (event: PortMessageEvent) => void): void
@@ -154,7 +164,9 @@ export function receivePort(type: string, target?: MessageWindowLike): Promise<D
   })
 }
 
-/** The slice of Electron's `ipcRenderer` the preload relay touches. */
+/**
+ * The slice of Electron's `ipcRenderer` the preload relay touches.
+ */
 export type PortIpcRendererLike = {
   on(channel: string, listener: (event: { ports: readonly unknown[] }) => void): unknown
 }
@@ -176,7 +188,9 @@ export function relayPort(
   })
 }
 
-/** The slice of a `BrowserWindow` that {@link sendPort} touches. */
+/**
+ * The slice of a `BrowserWindow` that {@link sendPort} touches.
+ */
 export type PortWindowLike = {
   webContents: {
     once(event: "did-finish-load", listener: () => void): unknown

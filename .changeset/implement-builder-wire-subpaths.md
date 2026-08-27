@@ -1,0 +1,10 @@
+---
+"typedport": minor
+---
+
+Handler builder, shipped wires, and late-arriving pipes. All additive.
+
+- **`implement()`.** `const tp = implement(contract).$context<Session>()` gives you a fragment factory per leaf: `tp.notes.open(async ({ path }, session) => ...)` infers input, output, and context with zero annotations, so handlers can live next to their domain code, one file per contract branch. Assemble with `createRouter(contract, { notes, ping })`, where a namespace import of a handler module already has the right shape (stray helper exports are ignored). A missing leaf, a fragment in the wrong slot, a fragment from another contract, or two fragments built against different contexts are all compile errors at the assembly site. The context type is written once, at `$context`; `createRouter` infers it from the fragments. The flat resolver map still works unchanged.
+- **`connect` accepts `Promise<Wire>`.** For pipes that aren't ready yet: a port still being handed over, a socket still opening. Calls made in the meantime queue (bounded by `timeoutMs`) and flush on arrival; `close()` before arrival rejects them and ignores the late wire; a rejected wire promise closes the connection with the rejection as `cause`. This replaces the hand-rolled deferred-transport pattern, which silently dropped per-call options.
+- **`typedport/wire/message-port`.** `mainPort` (Electron `MessagePortMain`, in main and utility processes), `domPort` (DOM `MessagePort`), and `nodePort` (`worker_threads` ports, `Worker`, `parentPort`) turn each port flavor into a `Wire`. For Electron, `sendPort` / `relayPort` / `receivePort` are the main → preload → renderer hand-off, with the same-window/type guard built into `receivePort`. Everything is structurally typed, with no dependency on Electron or DOM types.
+- **`typedport/wire/web-socket`.** `webSocket` wraps a browser/Node `WebSocket` or a `ws` socket as a `Wire` (JSON frames, Buffer-tolerant), and `whenOpen(socket)` pairs with the pending-wire `connect`: `connect(whenOpen(ws).then(webSocket), { router })`.

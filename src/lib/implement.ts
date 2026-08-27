@@ -9,14 +9,15 @@ type Join<Prefix extends string, Key extends string> = Prefix extends "" ? Key :
  * and coercions) and the per-dispatch context. A round-trip leaf must return something its `output`
  * schema accepts; a one-way leaf's resolver may return anything — the router discards it.
  */
-type ResolverFor<Leaf, Context> = Leaf extends Channel<infer Input, infer Output>
-  ? Output extends StandardSchemaV1
-    ? (
-        input: StandardSchemaV1.InferOutput<Input>,
-        context: Context
-      ) => MaybePromise<StandardSchemaV1.InferInput<Output>>
-    : (input: StandardSchemaV1.InferOutput<Input>, context: Context) => unknown
-  : never
+type ResolverFor<Leaf, Context> =
+  Leaf extends Channel<infer Input, infer Output>
+    ? Output extends StandardSchemaV1
+      ? (
+          input: StandardSchemaV1.InferOutput<Input>,
+          context: Context
+        ) => MaybePromise<StandardSchemaV1.InferInput<Output>>
+      : (input: StandardSchemaV1.InferOutput<Input>, context: Context) => unknown
+    : never
 
 /**
  * One implemented leaf: the dotted path it serves, the resolver, and (as a phantom on the resolver)
@@ -31,7 +32,9 @@ export type Fragment<Path extends string = string, Context = never> = {
   $resolver: (input: never, context: Context) => unknown
 }
 
-/** The widest fragment: every concrete `Fragment<P, C>` is assignable to it (contravariance). */
+/**
+ * The widest fragment: every concrete `Fragment<P, C>` is assignable to it (contravariance).
+ */
 type AnyFragment = Fragment
 
 /**
@@ -86,9 +89,7 @@ function build(tree: ContractTree, prefix: string): Record<string, unknown> {
 }
 
 export function isFragment(node: unknown): node is Fragment {
-  return (
-    typeof node === "object" && node !== null && "_kind" in node && node._kind === "fragment"
-  )
+  return typeof node === "object" && node !== null && "_kind" in node && node._kind === "fragment"
 }
 
 /**
@@ -102,7 +103,9 @@ export type FragmentTree<Tree, Context, Prefix extends string = ""> = {
     : FragmentTree<Tree[Key], Context, Join<Prefix, Key>>
 }
 
-/** The union of fragments anywhere in a handler tree; stray non-fragment exports contribute nothing. */
+/**
+ * The union of fragments anywhere in a handler tree; stray non-fragment exports contribute nothing.
+ */
 type HandlerLeaves<Handlers> = Handlers extends AnyFragment
   ? Handlers
   : Handlers extends object

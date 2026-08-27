@@ -39,8 +39,8 @@ export type Router<Context = void> = {
  * Builds the validating dispatcher for a contract, from either resolver shape:
  *
  * - A **handler tree** of `implement()` fragments mirroring the contract — a namespace import of a
- *   one-file-per-branch handler module already has the shape (`createRouter(contract, { notes,
- *   ping })`). A missing leaf is a missing property, a fragment in the wrong slot is a path-brand
+ *   one-file-per-branch handler module already has the shape (`createRouter(contract, { notes, ping
+ *   })`). A missing leaf is a missing property, a fragment in the wrong slot is a path-brand
  *   mismatch, and the context type is inferred from the fragments — it is only ever written at
  *   `implement(contract).$context<Session>()`.
  * - A **flat map** keyed by dotted path — the right tool at small sizes. Declare a context type

@@ -45,7 +45,9 @@ export function webSocket(socket: WebSocketLike): Wire {
   }
 }
 
-/** Resolves with the socket once it can send — immediately if it already can. */
+/**
+ * Resolves with the socket once it can send — immediately if it already can.
+ */
 export function whenOpen<Socket extends WebSocketLike>(socket: Socket): Promise<Socket> {
   if (socket.readyState === OPEN) {
     return Promise.resolve(socket)

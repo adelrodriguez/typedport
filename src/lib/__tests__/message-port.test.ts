@@ -177,7 +177,9 @@ function createFakeWindow(): {
   posted: WindowMessage[]
   listenerCount: () => number
 } {
-  let listeners: Array<(event: { data: unknown; ports: readonly DomPortLike[]; source: unknown }) => void> = []
+  let listeners: Array<
+    (event: { data: unknown; ports: readonly DomPortLike[]; source: unknown }) => void
+  > = []
   const posted: WindowMessage[] = []
 
   return {
