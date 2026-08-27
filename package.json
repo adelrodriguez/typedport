@@ -1,6 +1,6 @@
 {
   "name": "typedport",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Type-safe, Proxy-based RPC from a Standard Schema contract tree — a transport-agnostic core for adapters like Electron IPC, WebSockets, and message queues",
   "keywords": [
     "arktype",

@@ -1,5 +1,27 @@
 # typedport
 
+## 0.2.0
+
+### Minor Changes
+
+- 9b6beb7: Handler builder, shipped wires, and late-arriving pipes. All additive.
+
+  - **`implement()`.** `const tp = implement(contract).$context<Session>()` gives you a fragment factory per leaf: `tp.notes.open(async ({ path }, session) => ...)` infers input, output, and context with zero annotations, so handlers can live next to their domain code, one file per contract branch. Assemble with `createRouter(contract, { notes, ping })`, where a namespace import of a handler module already has the right shape (stray helper exports are ignored). A missing leaf, a fragment in the wrong slot, a fragment from another contract, or two fragments built against different contexts are all compile errors at the assembly site. The context type is written once, at `$context`; `createRouter` infers it from the fragments. The flat resolver map still works unchanged.
+  - **`connect` accepts `Promise<Wire>`.** For pipes that aren't ready yet: a port still being handed over, a socket still opening. Calls made in the meantime queue (bounded by `timeoutMs`) and flush on arrival; `close()` before arrival rejects them and ignores the late wire; a rejected wire promise closes the connection with the rejection as `cause`. This replaces the hand-rolled deferred-transport pattern, which silently dropped per-call options.
+  - **`typedport/wire/message-port`.** `mainPort` (Electron `MessagePortMain`, in main and utility processes), `domPort` (DOM `MessagePort`), and `nodePort` (`worker_threads` ports, `Worker`, `parentPort`) turn each port flavor into a `Wire`. For Electron, `sendPort` / `relayPort` / `receivePort` are the main → preload → renderer hand-off, with the same-window/type guard built into `receivePort`. Everything is structurally typed, with no dependency on Electron or DOM types.
+  - **`typedport/wire/web-socket`.** `webSocket` wraps a browser/Node `WebSocket` or a `ws` socket as a `Wire` (JSON frames, Buffer-tolerant), and `whenOpen(socket)` pairs with the pending-wire `connect`: `connect(whenOpen(ws).then(webSocket), { router })`.
+
+- 9b6beb7: Breaking API sweep ahead of the freeze (0.x, so breaking changes ride minor bumps).
+
+  - **`event()` is now `channel()`.** One leaf constructor for both shapes — `channel({ input, output })` is a round trip, `channel(schema)` is one-way — matching the vocabulary the library already used everywhere else (`router.channels`, `unknown-channel`). The leaf discriminant is now `_kind: "channel"`, the `Leaf` type is now `Channel`, and `isLeaf` is now `isChannel`.
+  - **`TypeportError` is now `ChannelError`** (and `TypeportErrorDetail` is `ChannelErrorDetail`). Same single class, same `code` discrimination; only the name changed, retiring the residue of the old package name.
+  - **The client proxy is no longer thenable.** `then` and `toJSON` return `undefined` from the proxy and are rejected as contract keys by `defineContract`. Previously `await client.someBranch` dispatched the path `"someBranch.then"` and never settled.
+  - The README now documents the adapter-author toolkit (`flatten`, `isChannel`, `parseWith`, `Transport`, `OneWayContract`, `InferClient`, `Channel`) and the client-side output-validation pattern (`parseWith(api.leaf.$output, result)`).
+
+  Housekeeping: the package itself was renamed from `typeport` to `typedport` in an earlier release without a changeset — this entry records it.
+
+  Migrating: rename `event(` → `channel(`, `TypeportError` → `ChannelError`, `Leaf` → `Channel`, and `isLeaf` → `isChannel`. Also rename any contract key called `then` or `toJSON` (`defineContract` now rejects both), and update any hand-built leaf from `_kind: "event"` to `_kind: "channel"`.
+
 ## 0.1.0
 
 ### Minor Changes
