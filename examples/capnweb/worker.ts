@@ -32,16 +32,22 @@ export class WorkerApi extends RpcTarget {
   }
 
   // The part typedport's protocol cannot express: the main thread passes a live function, and
-  // the worker calls it — a capability crossing the boundary by reference, not by value.
-  streamPrimes(count: number, onPrime: (prime: number) => void): void {
-    let found = 0
+  // the worker calls it — a capability crossing the boundary by reference, not by value. Each
+  // call is an RPC; awaiting them surfaces callback failures to the caller and releases every
+  // call before the stream returns.
+  async streamPrimes(
+    count: number,
+    onPrime: (prime: number) => void | Promise<void>
+  ): Promise<void> {
+    const calls: Array<Promise<void>> = []
 
-    for (let candidate = 2; found < count; candidate += 1) {
+    for (let candidate = 2; calls.length < count; candidate += 1) {
       if (isPrime(candidate)) {
-        onPrime(candidate)
-        found += 1
+        calls.push(Promise.resolve(onPrime(candidate)))
       }
     }
+
+    await Promise.all(calls)
   }
 }
 

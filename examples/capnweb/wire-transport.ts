@@ -1,4 +1,4 @@
-// A capnweb RpcTransport over a typedport Wire. The wires carry structured-clonable values, so
+// A capnweb RpcTransport over a structured-clone typedport Wire (nodePort, mainPort, domPort), so
 // the session runs at encodingLevel "structuredClonable" — no JSON strings, native values ride
 // the port the same way typedport's own protocol does. The adapter's whole job is inverting
 // push (Wire hands values to a listener) into pull (capnweb awaits receive()), plus a close.
