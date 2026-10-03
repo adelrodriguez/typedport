@@ -6,6 +6,17 @@ import { parseWith } from "../core/schema"
 import { SetupError } from "../core/setup-error"
 import { flattenFragments } from "./implement"
 
+/**
+ * What an edge passes to `dispatch` besides the payload. `context` reaches every resolver
+ * untouched; with the default `Context = void` it disappears, and so does the requirement to pass
+ * anything. `signal` is the caller giving up: the resolver sees it, and `dispatch` rejects with its
+ * reason even if the resolver ignores it.
+ */
+// oxlint-disable-next-line no-invalid-void-type -- void is the no-context sentinel; it makes `context` optional
+export type DispatchOptions<Context = void> = { signal?: AbortSignal } & ([Context] extends [void]
+  ? { context?: undefined }
+  : { context: Context })
+
 export type Router<Context = void> = {
   /**
    * Every dotted path in the contract. Adapters use this to register transport endpoints (IPC
@@ -22,16 +33,17 @@ export type Router<Context = void> = {
    * `unknown-channel` for a path outside it; anything else escaping `dispatch` came from the
    * resolver.
    *
-   * `context` is whatever the edge knows about the caller (the authenticated user, the sender
-   * identity) and reaches every resolver untouched. With the default `Context = void` the argument
-   * disappears, and `dispatch` is a valid `Transport` — passing it to `createClient` wires the
-   * whole stack in-memory.
+   * The third argument carries the `context` and an optional `signal` — see {@link DispatchOptions}.
+   * With the default `Context = void` it is optional, and `dispatch` is a valid `Transport`:
+   * passing it to `createClient` wires the whole stack in-memory, `$with({ signal })` included.
    */
   dispatch: (
     path: string,
     raw: unknown,
-    // oxlint-disable-next-line no-invalid-void-type -- void is the no-context sentinel; it makes the argument disappear entirely
-    ...context: Context extends void ? [] : [context: Context]
+    // oxlint-disable-next-line no-invalid-void-type -- void is the no-context sentinel; it makes the options optional
+    ...options: [Context] extends [void]
+      ? [options?: DispatchOptions<Context>]
+      : [options: DispatchOptions<Context>]
   ) => Promise<unknown>
 }
 
@@ -65,7 +77,7 @@ type CreateRouter = {
 // oxlint-disable-next-line typescript/consistent-type-assertions -- see above
 export const createRouter: CreateRouter = buildRouter as CreateRouter
 
-type AnyResolver = (input: unknown, context?: unknown) => unknown
+type AnyResolver = (input: unknown, options: { context: unknown; signal: AbortSignal }) => unknown
 
 function buildRouter(contract: ContractTree, resolvers: object): Router<never> {
   const leaves = flatten(contract)
@@ -89,15 +101,27 @@ function buildRouter(contract: ContractTree, resolvers: object): Router<never> {
     resolverMap[path] = resolver as AnyResolver
   }
 
-  const dispatch = async (path: string, raw: unknown, context?: unknown): Promise<unknown> => {
+  const dispatch = async (
+    path: string,
+    raw: unknown,
+    options: { context?: unknown; signal?: AbortSignal } = {}
+  ): Promise<unknown> => {
+    const { context } = options
+    // Resolvers always get a signal, so they can pass it on without checking for one.
+    const signal = options.signal ?? new AbortController().signal
     const leaf = leaves[path]
     const resolver = resolverMap[path]
+
+    signal.throwIfAborted()
 
     if (!(leaf && resolver)) {
       throw new ChannelError({ code: "unknown-channel", path })
     }
 
-    const result = await resolver(await parseWith(leaf.input, raw), context)
+    const input = await parseWith(leaf.input, raw)
+    // Parsing may be async; a caller that gave up meanwhile must not start the resolver.
+    signal.throwIfAborted()
+    const result = await untilAborted(() => resolver(input, { context, signal }), signal)
 
     if (!leaf.output) {
       return
@@ -127,4 +151,27 @@ function buildRouter(contract: ContractTree, resolvers: object): Router<never> {
 // `createRouter` shapes.
 function isHandlerTree(resolvers: object): resolvers is Record<string, unknown> {
   return Object.values(resolvers).some((value) => typeof value !== "function")
+}
+
+// Settles with `run()`, or rejects with the abort reason as soon as `signal` aborts — so a caller
+// that gave up is released even when the resolver ignores its signal. The listener attaches before
+// `run` starts, so the caller's reason wins over whatever a signal-aware resolver throws in reply.
+async function untilAborted(run: () => unknown, signal: AbortSignal): Promise<unknown> {
+  let onAbort: (() => void) | undefined
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => {
+      // oxlint-disable-next-line prefer-promise-reject-errors -- an abort rejects with the caller's own reason, as fetch does
+      reject(signal.reason)
+    }
+    signal.addEventListener("abort", onAbort, { once: true })
+  })
+
+  try {
+    return await Promise.race([run(), aborted])
+  } finally {
+    // Detached once settled, so `aborted` can never reject unobserved later.
+    if (onAbort) {
+      signal.removeEventListener("abort", onAbort)
+    }
+  }
 }

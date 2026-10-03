@@ -2,7 +2,7 @@
 // The consumer: QStash calls back into these routes. Messages go through one
 // route that verifies the signature and dispatches; workflows go through
 // Upstash Workflow's serve, with the WorkflowContext passed to resolvers as
-// the router context.
+// their `context`.
 import { serve } from "@hono/node-server"
 import { Receiver } from "@upstash/qstash"
 import { serve as serveWorkflow, type WorkflowContext } from "@upstash/workflow"
@@ -23,7 +23,7 @@ const messageRouter = createRouter(messages, {
 // Workflow resolvers are re-entered once per step; context.run memoizes each
 // completed step, so the body reads top to bottom like ordinary code.
 const workflowRouter = createRouter<typeof workflows, WorkflowContext>(workflows, {
-  "reports.generate": async ({ reportId }, context) => {
+  "reports.generate": async ({ reportId }, { context }) => {
     const rows = await context.run("query", () => 3)
     await context.sleep("cool-down", 1)
     await context.run("render", () => {
@@ -90,7 +90,7 @@ app.post("/messages/:path", async (c) => {
 const workflowHandlers = new Map(
   workflowRouter.channels.map((path) => [
     path,
-    serveWorkflow((context) => workflowRouter.dispatch(path, context.requestPayload, context), {
+    serveWorkflow((context) => workflowRouter.dispatch(path, context.requestPayload, { context }), {
       env: {
         QSTASH_CURRENT_SIGNING_KEY: env.QSTASH_CURRENT_SIGNING_KEY,
         QSTASH_NEXT_SIGNING_KEY: env.QSTASH_NEXT_SIGNING_KEY,
