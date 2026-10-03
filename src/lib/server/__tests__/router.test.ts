@@ -16,18 +16,29 @@ const contract = defineContract({
   notify: channel(z.object({ message: z.string() })),
 })
 
-// A Standard Schema whose validation waits until released, to abort mid-parse.
-function gatedSchema(): { schema: StandardSchemaV1<number, number>; release: () => void } {
+// A Standard Schema whose validation waits until released, to abort mid-parse. `entered` resolves
+// once validation has actually started.
+function gatedSchema(): {
+  entered: Promise<void>
+  release: () => void
+  schema: StandardSchemaV1<number, number>
+} {
   let release: (() => void) | undefined
+  let enter: (() => void) | undefined
   const gate = new Promise<void>((resolve) => {
     release = resolve
   })
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve
+  })
 
   return {
+    entered,
     release: () => release?.(),
     schema: {
       "~standard": {
         validate: async (value) => {
+          enter?.()
           await gate
           return { value: value as number }
         },
@@ -277,22 +288,14 @@ describe("createRouter", () => {
     })
 
     test("releases the caller while async output parsing is pending", async () => {
-      const { release, schema } = gatedSchema()
+      const { entered, release, schema } = gatedSchema()
       const gated = defineContract({ add: channel({ input: z.number(), output: schema }) })
-      let resolverRan: (() => void) | undefined
-      const ran = new Promise<void>((resolve) => {
-        resolverRan = resolve
-      })
-      const router = createRouter(gated, {
-        add: (n) => {
-          resolverRan?.()
-          return n
-        },
-      })
+      const router = createRouter(gated, { add: (n) => n })
       const controller = new AbortController()
 
       const call = router.dispatch("add", 5, { signal: controller.signal })
-      await ran
+      // Abort strictly mid-validation, so only a race that spans output parsing can pass.
+      await entered
       controller.abort("stop")
 
       await expect(call).rejects.toBe("stop")
