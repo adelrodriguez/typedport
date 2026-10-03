@@ -8,8 +8,6 @@ export type SetupErrorDetail =
   | { code: "missing-resolver"; path: string }
   | { code: "no-window"; caller: string }
   | { code: "reserved-key"; key: string; path: string }
-  | { code: "socket-closed" }
-  | { code: "socket-failed" }
 
 function messageFor(detail: SetupErrorDetail): string {
   switch (detail.code) {
@@ -27,10 +25,6 @@ function messageFor(detail: SetupErrorDetail): string {
       return `${detail.caller} needs a window; outside the DOM, pass one explicitly`
     case "reserved-key":
       return `Reserved key "${detail.key}" at "${detail.path}" in contract`
-    case "socket-closed":
-      return "Socket closed before opening"
-    case "socket-failed":
-      return "Socket failed before opening"
   }
 }
 
@@ -44,11 +38,10 @@ class SetupBaseError extends Error {
 }
 
 /**
- * The error class for everything typedport raises outside a call: a contract that can't be defined,
- * a router that can't be assembled, a port hand-off with no window, a socket that never opened.
- * `ChannelError` is the other half — failures of a call, serializable across the wire. A
- * `SetupError` never travels: it surfaces where the wiring happens, usually as a bug to fix rather
- * than a condition to handle.
+ * The error class for misusing typedport outside a call: a contract that can't be defined, a router
+ * that can't be assembled, a port hand-off with no window. `ChannelError` is the other half —
+ * failures of a call, serializable across the wire. A `SetupError` never travels: it surfaces where
+ * the wiring happens, as a bug to fix rather than a condition to handle.
  *
  * - `reserved-key` (`key`, `path`) — a contract key the client proxy claims (`$`-helpers, `_kind`,
  *   `then`, `toJSON`)
@@ -58,7 +51,6 @@ class SetupBaseError extends Error {
  *   fragment or branch the contract demands
  * - `misplaced-handler` (`path`, `fragmentPath`) — a fragment built for another leaf
  * - `no-window` (`caller`) — a port hand-off called outside the DOM without an explicit window
- * - `socket-failed`, `socket-closed` — `whenOpen`'s socket errored or closed before opening
  *
  * `instanceof SetupError` then `error.code === "..."` narrows the fields.
  */

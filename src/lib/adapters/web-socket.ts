@@ -1,5 +1,5 @@
 import type { Wire } from "../wire/types"
-import { SetupError } from "../core/setup-error"
+import { ChannelError } from "../core/error"
 
 /**
  * The shape both socket families share: the browser/Node built-in `WebSocket` and the `ws`
@@ -67,7 +67,9 @@ export function webSocket(socket: WebSocketLike): Wire {
 /**
  * Resolves with the socket once it can send — immediately if it already can. Rejects if the socket
  * errors or closes before opening, or is already closing or closed, so a dead endpoint fails loudly
- * instead of leaving the promise (and everything `connect` queued behind it) pending forever.
+ * instead of leaving the promise (and everything `connect` queued behind it) pending forever. The
+ * rejection is a `ChannelError` with code `closed`; `cause` says whether the socket errored or
+ * closed.
  *
  * The listeners detach once the promise settles, so a `ws` socket keeps Node's
  * throw-on-unhandled-`error` default after it opens. Attach your own `error` listener there.
@@ -79,7 +81,7 @@ export function whenOpen<Socket extends WebSocketLike>(socket: Socket): Promise<
 
   // A closed socket emits nothing more, so waiting for `close` would hang forever.
   if (socket.readyState >= CLOSING) {
-    return Promise.reject(new SetupError({ code: "socket-closed" }))
+    return Promise.reject(notOpened("closed"))
   }
 
   return new Promise((resolve, reject) => {
@@ -97,15 +99,21 @@ export function whenOpen<Socket extends WebSocketLike>(socket: Socket): Promise<
     }
     const onError = (): void => {
       detach()
-      reject(new SetupError({ code: "socket-failed" }))
+      reject(notOpened("errored"))
     }
     const onClose = (): void => {
       detach()
-      reject(new SetupError({ code: "socket-closed" }))
+      reject(notOpened("closed"))
     }
 
     socket.addEventListener("open", onOpen)
     socket.addEventListener("error", onError)
     socket.addEventListener("close", onClose)
   })
+}
+
+// A socket that never opens is a wire torn down before its first message — a condition callers
+// handle (retry, reconnect), so it is a ChannelError `closed`, like a wire closed later on.
+function notOpened(how: "closed" | "errored"): ChannelError {
+  return new ChannelError({ code: "closed" }, { cause: new Error(`Socket ${how} before opening`) })
 }

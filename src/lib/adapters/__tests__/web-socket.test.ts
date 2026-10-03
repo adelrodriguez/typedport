@@ -176,7 +176,12 @@ describe("whenOpen", () => {
 
     socket.fail()
 
-    await expect(pending).rejects.toThrow("Socket failed before opening")
+    await expect(pending).rejects.toThrow(
+      expect.objectContaining({
+        cause: new Error("Socket errored before opening"),
+        code: "closed",
+      }) as Error
+    )
   })
 
   test("rejects when the socket closes before opening", async () => {
@@ -186,7 +191,12 @@ describe("whenOpen", () => {
 
     socket.hangUp()
 
-    await expect(pending).rejects.toThrow("Socket closed before opening")
+    await expect(pending).rejects.toThrow(
+      expect.objectContaining({
+        cause: new Error("Socket closed before opening"),
+        code: "closed",
+      }) as Error
+    )
   })
 
   test("rejects a socket that is already closed instead of waiting forever", async () => {
@@ -198,7 +208,7 @@ describe("whenOpen", () => {
     }
 
     await expect(whenOpen(socket)).rejects.toThrow(
-      expect.objectContaining({ code: "socket-closed", name: "SetupError" }) as Error
+      expect.objectContaining({ code: "closed", name: "ChannelError" }) as Error
     )
   })
 
