@@ -140,6 +140,27 @@ describe("connect", () => {
     expect((error as ChannelError).message).toBe("This end does not serve requests")
   })
 
+  test("still replies when onHidden throws", async () => {
+    const [serverWire, clientWire] = createWirePair()
+    const router = createRouter(pullContract, {
+      "math.add": () => {
+        throw new Error("resolver exploded")
+      },
+    })
+
+    connect(serverWire, {
+      onHidden: () => {
+        throw new Error("logger broke")
+      },
+      router,
+    })
+    const { transport } = connect(clientWire, { timeoutMs: 1000 })
+
+    await expect(Promise.resolve(transport("math.add", { a: 1, b: 2 }))).rejects.toMatchObject({
+      code: "internal",
+    })
+  })
+
   test("connect can narrow what the peer sees", async () => {
     const [serverWire, clientWire] = createWirePair()
     const hidden: unknown[] = []
@@ -346,6 +367,10 @@ function holes(length: number): unknown[] {
   const array: unknown[] = []
   array.length = length
   return array
+}
+
+function throwCallbackError(): never {
+  throw new Error("callback broke")
 }
 
 describe("toWire / fromWire", () => {
@@ -567,6 +592,31 @@ describe("toWire / fromWire", () => {
     )
 
     expect(wire).toEqual({ error: { message: "no todo 42", name: "NotFoundError" }, ok: false })
+  })
+
+  test("still returns an envelope when expose or onHidden throws", async () => {
+    const crash = new Error("secret")
+
+    const [throwingPolicy, throwingLogger] = await Promise.all([
+      toWire(Promise.reject(crash), { expose: throwCallbackError }),
+      toWire(Promise.reject(crash), { onHidden: throwCallbackError }),
+    ])
+
+    // A broken policy keeps the failure hidden: the safe side.
+    for (const wire of [throwingPolicy, throwingLogger]) {
+      expect(wire).toMatchObject({ error: { detail: { code: "internal" } }, ok: false })
+    }
+  })
+
+  test("serializes thrown values that cannot convert to a string", async () => {
+    const wire = await toWire(
+      () => {
+        throw Object.create(null) as unknown
+      },
+      { expose: () => true }
+    )
+
+    expect(wire).toEqual({ error: { message: "Unknown error", name: "Error" }, ok: false })
   })
 
   test("captures operations that are not dispatch, including sync throws", async () => {

@@ -177,4 +177,3 @@ function isPathSegment(value: unknown): boolean {
 function isPropertyKey(value: unknown): value is PropertyKey {
   return typeof value === "string" || typeof value === "number" || typeof value === "symbol"
 }
-

@@ -60,13 +60,27 @@ export async function toWire(
   try {
     return { ok: true, result: await (typeof operation === "function" ? operation() : operation) }
   } catch (error) {
-    if (isAlwaysExposed(error) || options.expose?.(error) === true) {
+    if (isAlwaysExposed(error) || policyExposes(options.expose, error)) {
       return { error: serializeError(error), ok: false }
     }
 
-    options.onHidden?.(error)
+    try {
+      options.onHidden?.(error)
+    } catch {
+      // A failing logger must not cost the caller its reply.
+    }
 
     return { error: serializeError(new ChannelError({ code: "internal" })), ok: false }
+  }
+}
+
+// `toWire` promises never to throw, so a policy that throws counts as "no": the failure stays
+// hidden, which is the safe side.
+function policyExposes(expose: ExposeOptions["expose"], error: unknown): boolean {
+  try {
+    return expose?.(error) === true
+  } catch {
+    return false
   }
 }
 
@@ -143,5 +157,15 @@ function serializeError(error: unknown): Exclude<WireResult, { ok: true }>["erro
     return { message: error.message, name: error.name }
   }
 
-  return { message: String(error), name: "Error" }
+  return { message: describe(error), name: "Error" }
+}
+
+// `String()` throws for values with no usable conversion (`Object.create(null)`), and anything can
+// be thrown.
+function describe(value: unknown): string {
+  try {
+    return String(value)
+  } catch {
+    return "Unknown error"
+  }
 }
