@@ -23,7 +23,8 @@ the same shipped `nodePort` wire the worker-threads example uses. `wire-transpor
 typedport `Wire` to capnweb's pull-based `RpcTransport` — at encoding level `"structuredClonable"`,
 so values ride the port natively with no JSON framing. The same adapter over `mainPort`/`domPort`
 plus the `sendPort`/`relayPort`/`receivePort` hand-off gives capnweb an Electron main ↔ renderer
-transport. The demo shows both sides of the protocol swap: a live callback passed by reference
+transport; the demo exercises that pending-wire path by handing the adapter a `Promise<Wire>` that
+settles when the worker comes online, so the first call is queued and flushed on arrival. The demo shows both sides of the protocol swap: a live callback passed by reference
 (capability passing, which no contract tree can express) and an off-contract input reaching the
 worker unchecked (capnweb validates nothing at runtime):
 

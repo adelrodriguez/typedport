@@ -5,13 +5,25 @@
 // main ↔ renderer transport for capnweb.
 import { Worker } from "node:worker_threads"
 import { RpcSession } from "capnweb"
+import type { Wire } from "../../src/wire.ts"
 import type { WorkerApi } from "./worker.ts"
 import { nodePort } from "../../src/wire/message-port.ts"
 import { wireTransport } from "./wire-transport.ts"
 
 const worker = new Worker(new URL("worker.ts", import.meta.url))
 
-const { close, transport } = wireTransport(nodePort(worker))
+// A pending wire, settled once the worker is online — the shape of an Electron port still being
+// handed over. The first call below is made before it settles, so it waits in the adapter's
+// outbox and is flushed on arrival.
+const wire = new Promise<Wire>((resolve, reject) => {
+  worker.once("error", reject)
+  worker.once("online", () => {
+    worker.off("error", reject)
+    resolve(nodePort(worker))
+  })
+})
+
+const { close, transport } = wireTransport(wire)
 const session = new RpcSession<WorkerApi>(transport)
 const api = session.getRemoteMain()
 
@@ -25,7 +37,8 @@ await api.streamPrimes(5, (prime) => {
 
 // The trade: no schema boundary. The worker-threads example rejects { below: -1 } at the call
 // site before it leaves the thread; here the value reaches the worker unchecked.
-console.log("countPrimes(-1) went through unvalidated:", await api.countPrimes(-1))
+// The 0 is the sieve's own `below < 3` guard, not a rejection — the bad value arrived.
+console.log("countPrimes(-1) reached the worker unvalidated:", await api.countPrimes(-1))
 
 close()
 await worker.terminate()
