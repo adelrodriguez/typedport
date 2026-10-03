@@ -50,10 +50,12 @@ app.post("/messages/:path", async (c) => {
   const signature = c.req.header("upstash-signature")
   const body = await c.req.text()
 
+  // QStash signs the URL it published to, so verify against the public URL:
+  // behind a TLS-terminating proxy, c.req.url is the internal http:// one.
   // verify throws on a malformed signature and resolves false on a wrong one.
+  const url = `${env.APP_URL}/messages/${path}`
   const verified =
-    signature !== undefined &&
-    (await receiver.verify({ body, signature, url: c.req.url }).catch(() => false))
+    signature !== undefined && (await receiver.verify({ body, signature, url }).catch(() => false))
 
   if (!verified) {
     return c.text("Invalid signature", 401)
@@ -83,7 +85,8 @@ app.post("/messages/:path", async (c) => {
 
 // One serve handler per workflow channel, built once at startup. serve
 // verifies QStash's signature itself and parses the initial payload; the
-// router validates it against the contract on every step.
+// router validates it against the contract on every step. `url` pins the
+// public URL for step callbacks, which would otherwise come from request.url.
 const workflowHandlers = new Map(
   workflowRouter.channels.map((path) => [
     path,
@@ -94,6 +97,7 @@ const workflowHandlers = new Map(
         QSTASH_TOKEN: env.QSTASH_TOKEN,
         QSTASH_URL: env.QSTASH_URL,
       },
+      url: `${env.APP_URL}/workflows/${path}`,
     }).handler,
   ])
 )
