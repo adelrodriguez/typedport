@@ -157,7 +157,7 @@ Per-call options shallow-merge over bound ones. When the transport declares no o
 
 ## Validation model
 
-Input is parsed twice by design. The client parses before sending so the caller gets an error with a stack trace at the call site. The router parses again before dispatching because the sender may not be your client at all. In transports like Electron IPC the receiving process must treat every message as untrusted. Only the router's parse is a security boundary.
+Input is validated twice by design. The client validates before sending so the caller gets an error with a stack trace at the call site, then sends the input as written, so a transform (`"21"` to `21`) runs once, in the router. The router parses before dispatching because the sender may not be your client at all. In transports like Electron IPC the receiving process must treat every message as untrusted. Only the router's parse is a security boundary.
 
 Results flow the other way with one parse. The router validates the resolver's return against `output` before it leaves the server, and the client returns the transport's value as-is. When the peer is a typedport router the result is schema-checked end to end. When it isn't (a plain HTTP endpoint, a mock), the client's return type is a promise, not a guarantee, so validate at the edge if you don't trust the peer. The pieces are already in hand: `parseWith` is the same parse the router uses, and every round-trip leaf carries its schema as `$output`:
 

@@ -9,9 +9,10 @@ import { createRecursiveProxy } from "./proxy"
 /**
  * Builds the Proxy-backed client for a contract over a transport. Every leaf is directly callable.
  *
- * Input is validated before it leaves the client so the caller gets an error at the call site. The
- * receiving router validates again: client-side parsing is a convenience, only the router's parse
- * is a trust boundary.
+ * Input is validated before it leaves the client so the caller gets an error at the call site, then
+ * sent as the caller wrote it. The receiving router does the real parse — defaults, transforms, and
+ * stripping happen there: client-side validation is a convenience, only the router's parse is a
+ * trust boundary.
  *
  * When the transport declares a per-call options parameter, every call accepts it positionally
  * (`api.leaf(input, options)`) and `$with(options)` — on the root or any subtree — returns the same
@@ -62,12 +63,14 @@ export function createClient<Tree extends ContractTree, Options = never>(
     input: unknown,
     options: Options | undefined
   ): Promise<unknown> {
-    const leaf = getChannel(leaves, leafPath)
+    // Validate for the call-site error, but send the caller's input as written: the router parses
+    // it with the same schema, and a transform (string → number) would not survive a second pass.
+    await parseWith(getChannel(leaves, leafPath).input, input)
 
     // The transport's result is passed through untouched. For one-way leaves the
     // call is typed `Promise<void>`, but the raw value (a queue receipt, an ack)
     // stays reachable for edges that want it.
-    return await transport(leafPath, await parseWith(leaf.input, input), options)
+    return await transport(leafPath, input, options)
   }
 }
 
