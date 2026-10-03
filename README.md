@@ -247,7 +247,7 @@ Two caveats on `webSocket`. Sockets carry frames, not values, so the envelope ri
 
 ## Writing an adapter
 
-Transports live in your codebase, not in this package. A transport is one function, and the examples in this repo (worker threads, WebSocket, Hono) are the reference implementations. The supported toolkit:
+Transports live in your codebase, not in this package. A transport is one function, and the examples in this repo (worker threads, WebSocket, Hono, QStash) are the reference implementations. The supported toolkit:
 
 - **`flatten(contract)`.** The tree as a flat `Record<path, Channel>`, for edges that register endpoints ahead of time (`router.channels` is the same list of paths).
 - **`isChannel(node)`.** The discriminant for walking a `ContractTree` yourself.

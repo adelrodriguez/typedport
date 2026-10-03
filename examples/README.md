@@ -38,3 +38,18 @@ over [`ws`](https://github.com/websockets/ws), the client over Node's built-in `
 pnpm tsx examples/websocket/server.ts
 pnpm tsx examples/websocket/client.ts
 ```
+
+## QStash (message queue)
+
+A one-way stack over [Upstash QStash](https://upstash.com/docs/qstash): `createPublisher` and
+`createTrigger` turn a `OneWayContract` into typed publish and workflow-trigger clients (per-call
+options like `delay` ride the transport), and a Hono server verifies the `Upstash-Signature` before
+dispatching. Workflow resolvers receive the `WorkflowContext` as their router context, so steps are
+plain `context.run` calls with a typed payload. Start the local QStash dev server, then run the
+server and client (set `QSTASH_URL` if the dev server isn't on port 8080):
+
+```bash
+npx @upstash/qstash-cli dev
+pnpm tsx examples/qstash/server.ts
+pnpm tsx examples/qstash/client.ts
+```
