@@ -132,7 +132,7 @@ export function parseDetail(value: unknown): ChannelErrorDetail | undefined {
 }
 
 function isIssueList(value: unknown): value is readonly StandardSchemaV1.Issue[] {
-  return Array.isArray(value) && value.every((issue) => isIssue(issue))
+  return Array.isArray(value) && everySlot(value, isIssue)
 }
 
 // The Standard Schema issue shape: a string `message` and an optional `path` of property keys or
@@ -146,8 +146,14 @@ function isIssue(value: unknown): boolean {
 
   return (
     typeof message === "string" &&
-    (path === undefined || (Array.isArray(path) && path.every((segment) => isPathSegment(segment))))
+    (path === undefined || (Array.isArray(path) && everySlot(path, isPathSegment)))
   )
+}
+
+// `Array.prototype.every` skips empty slots, and structured clone (MessagePort, workers) preserves
+// them, so `new Array(1)` would pass. `Array.from` turns each hole into `undefined`, which fails.
+function everySlot(array: readonly unknown[], predicate: (value: unknown) => boolean): boolean {
+  return Array.from(array).every((value) => predicate(value))
 }
 
 function isPathSegment(value: unknown): boolean {

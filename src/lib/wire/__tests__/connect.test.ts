@@ -230,6 +230,13 @@ describe("connect", () => {
   })
 })
 
+// An array of empty slots, as `new Array(length)` makes, which structured clone preserves.
+function holes(length: number): unknown[] {
+  const array: unknown[] = []
+  array.length = length
+  return array
+}
+
 describe("toWire / fromWire", () => {
   const router = createRouter(pullContract, {
     "math.add": ({ a, b }) => a + b,
@@ -305,6 +312,8 @@ describe("toWire / fromWire", () => {
     ["an object path", { path: {} }],
     ["a null segment", { path: [null] }],
     ["a segment without a key", { path: [{ name: "a" }] }],
+    // Structured clone keeps empty slots, and `every` would skip them.
+    ["a sparse path", { path: structuredClone(holes(1)) }],
   ])("rejects issues with %s as malformed-envelope", (_name, extra) => {
     for (const code of ["validation", "output-validation"]) {
       expect(() =>
@@ -318,6 +327,19 @@ describe("toWire / fromWire", () => {
         })
       ).toThrow(expect.objectContaining({ code: "malformed-envelope" }) as Error)
     }
+  })
+
+  test("rejects a sparse issues list as malformed-envelope", () => {
+    expect(() =>
+      fromWire({
+        error: {
+          detail: { code: "validation", issues: structuredClone(holes(1)) },
+          message: "bad",
+          name: "ChannelError",
+        },
+        ok: false,
+      })
+    ).toThrow(expect.objectContaining({ code: "malformed-envelope" }) as Error)
   })
 
   test("accepts Standard Schema paths of keys and segments", () => {
