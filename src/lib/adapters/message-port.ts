@@ -1,4 +1,4 @@
-import type { Wire } from "./wire"
+import type { Wire } from "../wire/types"
 
 /**
  * `Wire` constructors for postMessage-shaped pipes, plus the Electron hand-off that gets a port

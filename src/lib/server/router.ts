@@ -1,10 +1,9 @@
-import type { ContractTree } from "./contract"
 import type { ContextOfHandlers, FragmentTree } from "./implement"
 import type { InferResolvers } from "./types"
-import { ChannelError } from "./error"
+import { type ContractTree, flatten } from "../core/contract"
+import { ChannelError } from "../core/error"
+import { parseWith } from "../core/schema"
 import { flattenFragments } from "./implement"
-import { parseWith } from "./standard"
-import { flatten } from "./utils"
 
 export type Router<Context = void> = {
   /**
@@ -64,11 +63,28 @@ type CreateRouter = {
 // are unaffected; the cast stands in for the compatibility check.
 export const createRouter: CreateRouter = buildRouter as CreateRouter
 
+type AnyResolver = (input: unknown, context?: unknown) => unknown
+
 function buildRouter(contract: ContractTree, resolvers: object): Router<never> {
   const leaves = flatten(contract)
-  const resolverMap = (
+  const source = (
     isHandlerTree(resolvers) ? flattenFragments(contract, resolvers) : resolvers
-  ) as Record<string, (input: unknown, context?: unknown) => unknown>
+  ) as Record<string, unknown>
+  // Snapshotted with no prototype, like `leaves`: an untrusted path such as "constructor" misses
+  // both maps instead of resolving to an `Object.prototype` member.
+  const resolverMap: Record<string, AnyResolver> = Object.create(null)
+
+  for (const path of Object.keys(leaves)) {
+    const resolver = Object.hasOwn(source, path) ? source[path] : undefined
+
+    // Fail at construction, as a handler tree does, rather than letting a forgotten leaf surface
+    // as `unknown-channel` on its first call.
+    if (typeof resolver !== "function") {
+      throw new Error(`Missing resolver for "${path}"`)
+    }
+
+    resolverMap[path] = resolver as AnyResolver
+  }
 
   const dispatch = async (path: string, raw: unknown, context?: unknown): Promise<unknown> => {
     const leaf = leaves[path]

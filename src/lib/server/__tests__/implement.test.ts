@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest"
 import * as z from "zod"
-import { defineContract, channel } from "../contract"
+import { defineContract, channel } from "../../core/contract"
 import { implement, isFragment, type FragmentTree } from "../implement"
 import { createRouter } from "../router"
 

@@ -1,9 +1,9 @@
-import type { ContractTree, Channel } from "./contract"
-import type { InferClient, Transport } from "./types"
-import { ChannelError } from "./error"
+import type { Transport } from "../core/transport"
+import type { InferClient } from "./types"
+import { type Channel, type ContractTree, flatten } from "../core/contract"
+import { ChannelError } from "../core/error"
+import { parseWith } from "../core/schema"
 import { createRecursiveProxy } from "./proxy"
-import { parseWith } from "./standard"
-import { flatten } from "./utils"
 
 /**
  * Builds the Proxy-backed client for a contract over a transport. Every leaf is directly callable.

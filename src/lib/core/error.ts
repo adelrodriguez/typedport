@@ -37,7 +37,9 @@ class ChannelBaseError extends Error {
     super(messageFor(detail), options)
     // oxlint-disable-next-line custom-error-definition -- instances present under the public name, ChannelError
     this.name = "ChannelError"
-    Object.assign(this, detail)
+    // Copy the known fields only: a detail rehydrated from a peer must not
+    // be able to overwrite `message`, `stack`, or `cause` on the instance.
+    Object.assign(this, detailOf(detail))
   }
 }
 
@@ -68,11 +70,11 @@ export const ChannelError = ChannelBaseError as unknown as new (
 ) => ChannelError
 
 /**
- * Recovers the serializable detail from an instance — the wire envelope's half of the round trip
- * `new ChannelError(detailOf(error))`.
+ * Recovers the serializable detail from an instance (or narrows a detail to its known fields) — the
+ * wire envelope's half of the round trip `new ChannelError(detailOf(error))`.
  */
-export function detailOf(error: ChannelError): ChannelErrorDetail {
-  switch (error.code) {
+export function detailOf(detail: ChannelErrorDetail): ChannelErrorDetail {
+  switch (detail.code) {
     case "closed":
       return { code: "closed" }
     case "malformed-envelope":
@@ -80,12 +82,63 @@ export function detailOf(error: ChannelError): ChannelErrorDetail {
     case "no-router":
       return { code: "no-router" }
     case "output-validation":
-      return { code: "output-validation", issues: error.issues }
+      return { code: "output-validation", issues: detail.issues }
     case "timeout":
-      return { code: "timeout", path: error.path, timeoutMs: error.timeoutMs }
+      return { code: "timeout", path: detail.path, timeoutMs: detail.timeoutMs }
     case "unknown-channel":
-      return { code: "unknown-channel", path: error.path }
+      return { code: "unknown-channel", path: detail.path }
     case "validation":
-      return { code: "validation", issues: error.issues }
+      return { code: "validation", issues: detail.issues }
   }
+}
+
+/**
+ * Validates an untrusted value as a `ChannelErrorDetail` — a detail that arrives over a wire is
+ * only as trustworthy as the peer. Returns `undefined` for an unknown code or mistyped fields.
+ */
+export function parseDetail(value: unknown): ChannelErrorDetail | undefined {
+  if (typeof value !== "object" || value === null || !("code" in value)) {
+    return undefined
+  }
+
+  const candidate = value as {
+    code: unknown
+    issues?: unknown
+    path?: unknown
+    timeoutMs?: unknown
+  }
+
+  switch (candidate.code) {
+    case "closed":
+    case "malformed-envelope":
+    case "no-router":
+      return { code: candidate.code }
+    case "output-validation":
+    case "validation":
+      return isIssueList(candidate.issues)
+        ? { code: candidate.code, issues: candidate.issues }
+        : undefined
+    case "timeout":
+      return typeof candidate.path === "string" && typeof candidate.timeoutMs === "number"
+        ? { code: "timeout", path: candidate.path, timeoutMs: candidate.timeoutMs }
+        : undefined
+    case "unknown-channel":
+      return typeof candidate.path === "string"
+        ? { code: "unknown-channel", path: candidate.path }
+        : undefined
+    default:
+      return undefined
+  }
+}
+
+function isIssueList(value: unknown): value is readonly StandardSchemaV1.Issue[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (issue: unknown) =>
+        typeof issue === "object" &&
+        issue !== null &&
+        typeof (issue as { message?: unknown }).message === "string"
+    )
+  )
 }

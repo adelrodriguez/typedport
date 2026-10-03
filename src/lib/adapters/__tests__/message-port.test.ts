@@ -1,7 +1,9 @@
 import { describe, expect, test } from "vitest"
 import * as z from "zod"
-import { createClient } from "../client"
-import { defineContract, channel } from "../contract"
+import { createClient } from "../../client/client"
+import { defineContract, channel } from "../../core/contract"
+import { createRouter } from "../../server/router"
+import { connect } from "../../wire/connect"
 import {
   domPort,
   mainPort,
@@ -14,8 +16,6 @@ import {
   type MessageWindowLike,
   type NodePortLike,
 } from "../message-port"
-import { createRouter } from "../router"
-import { connect } from "../wire"
 
 type Listener = (event: { data: unknown }) => void
 

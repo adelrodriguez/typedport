@@ -1,3 +1,5 @@
+import { INERT_KEYS } from "../core/contract"
+
 export function createRecursiveProxy(
   callback: (opts: { path: readonly string[]; args: readonly unknown[] }) => unknown,
   path: readonly string[]
@@ -12,21 +14,13 @@ export function createRecursiveProxy(
         return callback({ args, path })
       },
       get: (_obj, key) => {
-        if (typeof key !== "string") {
-          return
-        }
-
-        // Recursing on `then` would make every node thenable: `await
-        // client.branch` dispatches "branch.then" and the await never settles.
-        // Same probe pattern for JSON.stringify and `toJSON`. `defineContract`
-        // rejects both keys, so nothing real is shadowed.
-        if (key === "then" || key === "toJSON") {
+        if (typeof key !== "string" || INERT_KEYS.has(key)) {
           return
         }
 
         const nextPath = [...path, key]
 
-        // `$`-prefixed helpers (e.g. `$path`, `$schema`) are accessed directly
+        // `$`-prefixed helpers (`$path`, `$input`, `$with`, ...) are accessed directly
         // as properties, so we invoke the callback immediately.
         if (key.startsWith("$")) {
           return callback({ args: [], path: nextPath })

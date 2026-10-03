@@ -1,4 +1,4 @@
-import type { Wire } from "./wire"
+import type { Wire } from "../wire/types"
 
 /**
  * The shape both socket families share: the browser/Node built-in `WebSocket` and the `ws`
@@ -14,9 +14,10 @@ export type WebSocketLike = {
   removeEventListener(type: "open" | "close" | "error", listener: () => void): void
 }
 
-// WebSocket.OPEN — a static on the class, so the constant is restated here rather than reached
-// through a constructor the structural type deliberately doesn't require.
+// WebSocket.OPEN and .CLOSING — statics on the class, so the constants are restated here rather
+// than reached through a constructor the structural type deliberately doesn't require.
 const OPEN = 1
+const CLOSING = 2
 
 /**
  * Wraps a WebSocket as a `Wire`. Sockets carry frames, not values, so the wire envelope rides JSON
@@ -30,7 +31,8 @@ export function webSocket(socket: WebSocketLike): Wire {
   return {
     onMessage: (listener) => {
       const handle = (event: { data: unknown }): void => {
-        // Text frames arrive as strings in browsers and Buffers from `ws`.
+        // Text frames arrive as strings; String() also recovers text from a Buffer. Anything else
+        // is a binary frame, which this protocol never sends and the parse below drops.
         const raw = typeof event.data === "string" ? event.data : String(event.data)
 
         let data: unknown
@@ -63,8 +65,8 @@ export function webSocket(socket: WebSocketLike): Wire {
 
 /**
  * Resolves with the socket once it can send — immediately if it already can. Rejects if the socket
- * errors or closes before opening, so a dead endpoint fails loudly instead of leaving the promise
- * (and everything `connect` queued behind it) pending forever.
+ * errors or closes before opening, or is already closing or closed, so a dead endpoint fails loudly
+ * instead of leaving the promise (and everything `connect` queued behind it) pending forever.
  *
  * The listeners detach once the promise settles, so a `ws` socket keeps Node's
  * throw-on-unhandled-`error` default after it opens. Attach your own `error` listener there.
@@ -72,6 +74,11 @@ export function webSocket(socket: WebSocketLike): Wire {
 export function whenOpen<Socket extends WebSocketLike>(socket: Socket): Promise<Socket> {
   if (socket.readyState === OPEN) {
     return Promise.resolve(socket)
+  }
+
+  // A closed socket emits nothing more, so waiting for `close` would hang forever.
+  if (socket.readyState >= CLOSING) {
+    return Promise.reject(new Error("Socket closed before opening"))
   }
 
   return new Promise((resolve, reject) => {

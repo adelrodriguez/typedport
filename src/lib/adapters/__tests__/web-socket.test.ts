@@ -1,10 +1,10 @@
 import { describe, expect, test } from "vitest"
 import * as z from "zod"
-import { createClient } from "../client"
-import { defineContract, channel } from "../contract"
-import { createRouter } from "../router"
+import { createClient } from "../../client/client"
+import { defineContract, channel } from "../../core/contract"
+import { createRouter } from "../../server/router"
+import { connect } from "../../wire/connect"
 import { webSocket, whenOpen, type WebSocketLike } from "../web-socket"
-import { connect } from "../wire"
 
 type MessageListener = (event: { data: unknown }) => void
 
@@ -187,6 +187,17 @@ describe("whenOpen", () => {
     socket.hangUp()
 
     await expect(pending).rejects.toThrow("Socket closed before opening")
+  })
+
+  test("rejects a socket that is already closed instead of waiting forever", async () => {
+    const socket: WebSocketLike = {
+      addEventListener: () => null,
+      readyState: 3,
+      removeEventListener: () => null,
+      send: () => null,
+    }
+
+    await expect(whenOpen(socket)).rejects.toThrow("Socket closed before opening")
   })
 
   test("detaches its listeners once settled", async () => {

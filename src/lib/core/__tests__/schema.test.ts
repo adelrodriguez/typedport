@@ -1,11 +1,11 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import { describe, expect, test } from "vitest"
 import * as z from "zod"
-import { createClient } from "../client"
+import { createClient } from "../../client/client"
+import { createRouter } from "../../server/router"
 import { defineContract, channel } from "../contract"
 import { ChannelError } from "../error"
-import { createRouter } from "../router"
-import { parseWith } from "../standard"
+import { parseWith } from "../schema"
 
 const contract = defineContract({
   greet: channel({ input: z.object({ name: z.string() }), output: z.string() }),

@@ -1,7 +1,6 @@
 import { describe, expect, test } from "vitest"
 import * as z from "zod"
-import { defineContract, channel, type OneWayContract } from "../contract"
-import { flatten } from "../utils"
+import { defineContract, channel, flatten, type OneWayContract } from "../contract"
 
 describe("channel", () => {
   test("a bare schema builds a one-way leaf", () => {

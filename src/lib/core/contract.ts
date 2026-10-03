@@ -52,20 +52,21 @@ export function isChannel(node: ContractTree | Channel): node is Channel {
   return "_kind" in node && node._kind === "channel"
 }
 
-// `then` would make the client thenable — `await client.branch` dispatches
-// "branch.then" and hangs. `toJSON` is probed by JSON.stringify the same way.
-// The proxy refuses both keys, so the contract cannot define them.
-const RESERVED_KEYS = new Set(["_kind", "then", "toJSON"])
+/**
+ * Keys the client proxy must answer with `undefined` to stay inert: `then` would make every node
+ * thenable (`await client.branch` dispatches "branch.then" and hangs), and `JSON.stringify` probes
+ * `toJSON` the same way. `defineContract` rejects them, so nothing real is shadowed.
+ */
+export const INERT_KEYS: ReadonlySet<string> = new Set(["then", "toJSON"])
 
 /**
  * Identity at the type level. At runtime it rejects keys the client proxy claims as syntax
- * (`$`-helpers), the leaf brand (`_kind`), and the keys the proxy must refuse to stay inert under
- * `await` and `JSON.stringify` (`then`, `toJSON`) — so a contract cannot define a branch that the
- * proxy would silently shadow.
+ * (`$`-helpers), the leaf brand (`_kind`), and the {@link INERT_KEYS} — so a contract cannot define
+ * a branch that the proxy would silently shadow.
  */
 export function defineContract<Tree extends ContractTree>(tree: Tree): Tree {
-  for (const [path, key] of walkKeys(tree)) {
-    if (key.startsWith("$") || RESERVED_KEYS.has(key)) {
+  for (const { key, path } of walk(tree)) {
+    if (key.startsWith("$") || key === "_kind" || INERT_KEYS.has(key)) {
       throw new Error(`Reserved key "${key}" at "${path}" in contract`)
     }
 
@@ -79,14 +80,44 @@ export function defineContract<Tree extends ContractTree>(tree: Tree): Tree {
   return tree
 }
 
-function* walkKeys(tree: ContractTree, prefix = ""): Generator<[path: string, key: string]> {
-  for (const [key, node] of Object.entries(tree)) {
-    const path = prefix ? `${prefix}.${key}` : key
+export function joinPath(prefix: string, key: string): string {
+  return prefix ? `${prefix}.${key}` : key
+}
 
-    yield [path, key]
+/**
+ * The one traversal the rest of the library builds on.
+ *
+ * @yields {{ key: string; node: Channel | ContractTree; path: string }} Every node of the tree,
+ *   depth-first, with its key and dotted path.
+ */
+export function* walk(
+  tree: ContractTree,
+  prefix = ""
+): Generator<{ key: string; node: Channel | ContractTree; path: string }> {
+  for (const [key, node] of Object.entries(tree)) {
+    const path = joinPath(prefix, key)
+
+    yield { key, node, path }
 
     if (!isChannel(node)) {
-      yield* walkKeys(node, path)
+      yield* walk(node, path)
     }
   }
+}
+
+/**
+ * The tree as a flat `Record<path, Channel>`. The record has no prototype, so an untrusted path
+ * like `"constructor"` or `"__proto__"` misses instead of resolving to an `Object.prototype`
+ * member.
+ */
+export function flatten(tree: ContractTree, prefix = ""): Record<string, Channel> {
+  const result: Record<string, Channel> = Object.create(null)
+
+  for (const { node, path } of walk(tree, prefix)) {
+    if (isChannel(node)) {
+      result[path] = node
+    }
+  }
+
+  return result
 }
