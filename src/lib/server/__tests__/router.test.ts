@@ -1,3 +1,4 @@
+import type { StandardSchemaV1 } from "@standard-schema/spec"
 import { describe, expect, test } from "vitest"
 import * as z from "zod"
 import { createClient } from "../../client/client"
@@ -14,6 +15,51 @@ const contract = defineContract({
   },
   notify: channel(z.object({ message: z.string() })),
 })
+
+// A Standard Schema whose validation waits until released, to abort mid-parse.
+function gatedSchema(): { schema: StandardSchemaV1<number, number>; release: () => void } {
+  let release: (() => void) | undefined
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+
+  return {
+    release: () => release?.(),
+    schema: {
+      "~standard": {
+        validate: async (value) => {
+          await gate
+          return { value: value as number }
+        },
+        vendor: "test",
+        version: 1,
+      },
+    },
+  }
+}
+
+// Collects unhandled rejections for the duration of a test.
+function watchUnhandled(): { stop: () => unknown[] } {
+  const seen: unknown[] = []
+  const onUnhandled = (reason: unknown): void => {
+    seen.push(reason)
+  }
+
+  process.on("unhandledRejection", onUnhandled)
+
+  return {
+    stop: () => {
+      process.off("unhandledRejection", onUnhandled)
+      return seen
+    },
+  }
+}
+
+async function settleTimers(): Promise<void> {
+  await new Promise((resolve) => {
+    setTimeout(resolve, 10)
+  })
+}
 
 describe("createRouter", () => {
   test("lists every channel", () => {
@@ -206,5 +252,83 @@ describe("createRouter", () => {
     }, 0)
 
     await expect(call).rejects.toBe("gave up")
+  })
+
+  describe("cancellation covers the whole pipeline", () => {
+    test("releases the caller while async input parsing is pending, without running the resolver", async () => {
+      const { release, schema } = gatedSchema()
+      const gated = defineContract({ add: channel({ input: schema, output: z.number() }) })
+      let called = false
+      const router = createRouter(gated, {
+        add: (n) => {
+          called = true
+          return n
+        },
+      })
+      const controller = new AbortController()
+
+      const call = router.dispatch("add", 1, { signal: controller.signal })
+      controller.abort("stop")
+
+      await expect(call).rejects.toBe("stop")
+      release()
+      await settleTimers()
+      expect(called).toBe(false)
+    })
+
+    test("releases the caller while async output parsing is pending", async () => {
+      const { release, schema } = gatedSchema()
+      const gated = defineContract({ add: channel({ input: z.number(), output: schema }) })
+      let resolverRan: (() => void) | undefined
+      const ran = new Promise<void>((resolve) => {
+        resolverRan = resolve
+      })
+      const router = createRouter(gated, {
+        add: (n) => {
+          resolverRan?.()
+          return n
+        },
+      })
+      const controller = new AbortController()
+
+      const call = router.dispatch("add", 5, { signal: controller.signal })
+      await ran
+      controller.abort("stop")
+
+      await expect(call).rejects.toBe("stop")
+      release()
+    })
+
+    test.each([
+      // The reviewer's case: abort (say, via the session's close()) then throwIfAborted.
+      [
+        "throws",
+        (signal: AbortSignal): number => {
+          signal.throwIfAborted()
+          return 3
+        },
+      ],
+      ["returns", (): number => 3],
+    ])(
+      "a resolver that aborts synchronously then %s rejects with the reason, nothing unhandled",
+      async (_name, finish) => {
+        const watcher = watchUnhandled()
+        const controller = new AbortController()
+        const router = createRouter(contract, {
+          "math.add": (_input, { signal }) => {
+            controller.abort("closed by resolver")
+            return finish(signal)
+          },
+          notify: () => null,
+        })
+
+        await expect(
+          router.dispatch("math.add", { a: 1, b: 2 }, { signal: controller.signal })
+        ).rejects.toBe("closed by resolver")
+        await settleTimers()
+
+        expect(watcher.stop()).toEqual([])
+      }
+    )
   })
 })
