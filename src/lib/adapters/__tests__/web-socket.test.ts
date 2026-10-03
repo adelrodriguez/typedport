@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest"
+import WebSocket from "ws"
 import * as z from "zod"
 import { createClient } from "../../client/client"
 import { defineContract, channel } from "../../core/contract"
@@ -210,6 +211,16 @@ describe("whenOpen", () => {
     await expect(whenOpen(socket)).rejects.toThrow(
       expect.objectContaining({ code: "closed", name: "ChannelError" }) as Error
     )
+  })
+
+  test("survives a real ws socket closed mid-handshake", async () => {
+    // `close()` before the handshake leaves the socket CLOSING and makes `ws` emit `error` on
+    // the next tick. Without a listener for it, Node throws and the process dies.
+    const socket = new WebSocket("ws://127.0.0.1:1")
+    socket.close()
+
+    expect(socket.readyState).toBe(WebSocket.CLOSING)
+    await expect(whenOpen(socket)).rejects.toMatchObject({ code: "closed" })
   })
 
   test("detaches its listeners once settled", async () => {

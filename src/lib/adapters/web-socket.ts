@@ -15,10 +15,10 @@ export type WebSocketLike = {
   removeEventListener(type: "open" | "close" | "error", listener: () => void): void
 }
 
-// WebSocket.OPEN and .CLOSING — statics on the class, so the constants are restated here rather
+// WebSocket.OPEN and .CLOSED — statics on the class, so the constants are restated here rather
 // than reached through a constructor the structural type deliberately doesn't require.
 const OPEN = 1
-const CLOSING = 2
+const CLOSED = 3
 
 /**
  * Wraps a WebSocket as a `Wire`. Sockets carry frames, not values, so the wire envelope rides JSON
@@ -66,10 +66,9 @@ export function webSocket(socket: WebSocketLike): Wire {
 
 /**
  * Resolves with the socket once it can send — immediately if it already can. Rejects if the socket
- * errors or closes before opening, or is already closing or closed, so a dead endpoint fails loudly
- * instead of leaving the promise (and everything `connect` queued behind it) pending forever. The
- * rejection is a `ChannelError` with code `closed`; `cause` says whether the socket errored or
- * closed.
+ * errors or closes before opening, or has already closed, so a dead endpoint fails loudly instead
+ * of leaving the promise (and everything `connect` queued behind it) pending forever. The rejection
+ * is a `ChannelError` with code `closed`; `cause` says whether the socket errored or closed.
  *
  * The listeners detach once the promise settles, so a `ws` socket keeps Node's
  * throw-on-unhandled-`error` default after it opens. Attach your own `error` listener there.
@@ -79,8 +78,10 @@ export function whenOpen<Socket extends WebSocketLike>(socket: Socket): Promise<
     return Promise.resolve(socket)
   }
 
-  // A closed socket emits nothing more, so waiting for `close` would hang forever.
-  if (socket.readyState >= CLOSING) {
+  // A closed socket emits nothing more, so waiting for `close` would hang forever. A *closing* one
+  // still will — `ws` emits `error` on the next tick when closed mid-handshake, and an unheard
+  // `error` kills the process — so it takes the listener path below.
+  if (socket.readyState === CLOSED) {
     return Promise.reject(notOpened("closed"))
   }
 

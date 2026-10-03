@@ -132,13 +132,34 @@ export function parseDetail(value: unknown): ChannelErrorDetail | undefined {
 }
 
 function isIssueList(value: unknown): value is readonly StandardSchemaV1.Issue[] {
+  return Array.isArray(value) && value.every((issue) => isIssue(issue))
+}
+
+// The Standard Schema issue shape: a string `message` and an optional `path` of property keys or
+// `{ key }` segments. Consumers walk `path` freely, so a malformed one must not get through.
+function isIssue(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) {
+    return false
+  }
+
+  const { message, path } = value as { message?: unknown; path?: unknown }
+
   return (
-    Array.isArray(value) &&
-    value.every(
-      (issue: unknown) =>
-        typeof issue === "object" &&
-        issue !== null &&
-        typeof (issue as { message?: unknown }).message === "string"
-    )
+    typeof message === "string" &&
+    (path === undefined || (Array.isArray(path) && path.every((segment) => isPathSegment(segment))))
   )
+}
+
+function isPathSegment(value: unknown): boolean {
+  if (isPropertyKey(value)) {
+    return true
+  }
+
+  return (
+    typeof value === "object" && value !== null && isPropertyKey((value as { key?: unknown }).key)
+  )
+}
+
+function isPropertyKey(value: unknown): value is PropertyKey {
+  return typeof value === "string" || typeof value === "number" || typeof value === "symbol"
 }

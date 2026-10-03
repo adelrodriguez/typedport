@@ -301,6 +301,36 @@ describe("toWire / fromWire", () => {
     }
   })
 
+  test.each([
+    ["an object path", { path: {} }],
+    ["a null segment", { path: [null] }],
+    ["a segment without a key", { path: [{ name: "a" }] }],
+  ])("rejects issues with %s as malformed-envelope", (_name, extra) => {
+    for (const code of ["validation", "output-validation"]) {
+      expect(() =>
+        fromWire({
+          error: {
+            detail: { code, issues: [{ message: "bad", ...extra }] },
+            message: "bad",
+            name: "ChannelError",
+          },
+          ok: false,
+        })
+      ).toThrow(expect.objectContaining({ code: "malformed-envelope" }) as Error)
+    }
+  })
+
+  test("accepts Standard Schema paths of keys and segments", () => {
+    const issues = [{ message: "bad", path: ["items", 0, { key: "name" }] }, { message: "no path" }]
+
+    expect(() =>
+      fromWire({
+        error: { detail: { code: "validation", issues }, message: "bad", name: "ChannelError" },
+        ok: false,
+      })
+    ).toThrow(expect.objectContaining({ code: "validation", issues }) as Error)
+  })
+
   test("copies only a detail's known fields onto the rehydrated error", () => {
     const error = (() => {
       try {
