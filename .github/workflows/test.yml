@@ -75,6 +75,9 @@ jobs:
       - name: Run worker-threads example
         run: pnpm tsx examples/worker-threads/main.ts
 
+      - name: Run capnweb example
+        run: pnpm tsx examples/capnweb/main.ts
+
       - name: Run Hono example
         run: |
           pnpm tsx examples/hono/server.ts &
