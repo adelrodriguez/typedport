@@ -47,7 +47,13 @@ export class WorkerApi extends RpcTarget {
       }
     }
 
-    await Promise.all(calls)
+    // allSettled, not all: a failed callback must not end the stream while the others still run.
+    const results = await Promise.allSettled(calls)
+    const failed = results.find((result) => result.status === "rejected")
+
+    if (failed) {
+      throw failed.reason
+    }
   }
 }
 
