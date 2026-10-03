@@ -10,8 +10,8 @@ import { createRecursiveProxy } from "./proxy"
  * Builds the Proxy-backed client for a contract over a transport. Every leaf is directly callable.
  *
  * Input is validated before it leaves the client so the caller gets an error at the call site, then
- * sent as the caller wrote it. The receiving router does the real parse — defaults, transforms, and
- * stripping happen there: client-side validation is a convenience, only the router's parse is a
+ * sent as the caller wrote it; the parsed result is discarded. Only the receiving router's parsed
+ * value reaches the resolver: client-side validation is a convenience, only the router's parse is a
  * trust boundary.
  *
  * When the transport declares a per-call options parameter, every call accepts it positionally
