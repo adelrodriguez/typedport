@@ -197,7 +197,9 @@ describe("whenOpen", () => {
       send: () => null,
     }
 
-    await expect(whenOpen(socket)).rejects.toThrow("Socket closed before opening")
+    await expect(whenOpen(socket)).rejects.toThrow(
+      expect.objectContaining({ code: "socket-closed", name: "SetupError" }) as Error
+    )
   })
 
   test("detaches its listeners once settled", async () => {

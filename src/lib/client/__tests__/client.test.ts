@@ -92,6 +92,13 @@ describe("createClient", () => {
     await expect(tree.localFiles.rename()).rejects.toThrow('Unknown channel: "localFiles.rename"')
   })
 
+  test("returns the same node for the same path", () => {
+    const { client } = createTestClient()
+
+    expect(client.localFiles).toBe(client.localFiles)
+    expect(client.localFiles.open).toBe(client.localFiles.open)
+  })
+
   test("does not resolve Object.prototype members as channels", () => {
     const { client } = createTestClient()
     const tree = client as unknown as { constructor: { $input: unknown } }

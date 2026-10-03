@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest"
 import * as z from "zod"
 import { defineContract, channel, flatten, type OneWayContract } from "../contract"
+import { SetupError } from "../setup-error"
 
 describe("channel", () => {
   test("a bare schema builds a one-way leaf", () => {
@@ -53,6 +54,20 @@ describe("defineContract", () => {
         stripe: { [key]: channel(z.object({ id: z.string() })) },
       })
     ).toThrow(`Reserved key "${key}" at "stripe.${key}"`)
+  })
+
+  test("raises SetupError with the key and path", () => {
+    const error = (() => {
+      try {
+        defineContract({ stripe: { $path: channel(z.string()) } })
+        return null
+      } catch (error) {
+        return error
+      }
+    })()
+
+    expect(error).toBeInstanceOf(SetupError)
+    expect(error).toMatchObject({ code: "reserved-key", key: "$path", path: "stripe.$path" })
   })
 
   test("rejects reserved keys used as branches", () => {

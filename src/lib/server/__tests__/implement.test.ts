@@ -73,7 +73,7 @@ describe("createRouter with a handler tree", () => {
 
   test("throws at assembly when a handler is missing", () => {
     expect(() => createRouter(contract, { notes: { open, save } } as unknown as Handlers)).toThrow(
-      'Missing handler for "ping"'
+      'Missing resolver for "ping"'
     )
   })
 

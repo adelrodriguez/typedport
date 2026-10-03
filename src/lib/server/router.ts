@@ -3,6 +3,7 @@ import type { InferResolvers } from "./types"
 import { type ContractTree, flatten } from "../core/contract"
 import { ChannelError } from "../core/error"
 import { parseWith } from "../core/schema"
+import { SetupError } from "../core/setup-error"
 import { flattenFragments } from "./implement"
 
 export type Router<Context = void> = {
@@ -80,7 +81,7 @@ function buildRouter(contract: ContractTree, resolvers: object): Router<never> {
     // Fail at construction, as a handler tree does, rather than letting a forgotten leaf surface
     // as `unknown-channel` on its first call.
     if (typeof resolver !== "function") {
-      throw new Error(`Missing resolver for "${path}"`)
+      throw new SetupError({ code: "missing-resolver", path })
     }
 
     resolverMap[path] = resolver as AnyResolver

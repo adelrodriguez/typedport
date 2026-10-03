@@ -1,4 +1,5 @@
 import type { Wire } from "../wire/types"
+import { SetupError } from "../core/setup-error"
 
 /**
  * The shape both socket families share: the browser/Node built-in `WebSocket` and the `ws`
@@ -78,7 +79,7 @@ export function whenOpen<Socket extends WebSocketLike>(socket: Socket): Promise<
 
   // A closed socket emits nothing more, so waiting for `close` would hang forever.
   if (socket.readyState >= CLOSING) {
-    return Promise.reject(new Error("Socket closed before opening"))
+    return Promise.reject(new SetupError({ code: "socket-closed" }))
   }
 
   return new Promise((resolve, reject) => {
@@ -96,11 +97,11 @@ export function whenOpen<Socket extends WebSocketLike>(socket: Socket): Promise<
     }
     const onError = (): void => {
       detach()
-      reject(new Error("Socket failed before opening"))
+      reject(new SetupError({ code: "socket-failed" }))
     }
     const onClose = (): void => {
       detach()
-      reject(new Error("Socket closed before opening"))
+      reject(new SetupError({ code: "socket-closed" }))
     }
 
     socket.addEventListener("open", onOpen)

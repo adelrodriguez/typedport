@@ -10,6 +10,7 @@ export {
   type OneWayContract,
 } from "./lib/core/contract"
 export { ChannelError, type ChannelErrorDetail } from "./lib/core/error"
+export { SetupError, type SetupErrorDetail } from "./lib/core/setup-error"
 export { parseWith } from "./lib/core/schema"
 export type { Transport } from "./lib/core/transport"
 export {

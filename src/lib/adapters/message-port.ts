@@ -1,4 +1,5 @@
 import type { Wire } from "../wire/types"
+import { SetupError } from "../core/setup-error"
 
 /**
  * `Wire` constructors for postMessage-shaped pipes, plus the Electron hand-off that gets a port
@@ -129,7 +130,7 @@ function defaultWindow(caller: string): MessageWindowLike {
   const candidate = (globalThis as { window?: MessageWindowLike }).window
 
   if (!candidate) {
-    throw new Error(`${caller} needs a window; outside the DOM, pass one explicitly`)
+    throw new SetupError({ caller, code: "no-window" })
   }
 
   return candidate

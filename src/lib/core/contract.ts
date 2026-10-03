@@ -1,4 +1,5 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec"
+import { SetupError } from "./setup-error"
 
 export type Channel<
   Input extends StandardSchemaV1 = StandardSchemaV1,
@@ -67,13 +68,13 @@ export const INERT_KEYS: ReadonlySet<string> = new Set(["then", "toJSON"])
 export function defineContract<Tree extends ContractTree>(tree: Tree): Tree {
   for (const { key, path } of walk(tree)) {
     if (key.startsWith("$") || key === "_kind" || INERT_KEYS.has(key)) {
-      throw new Error(`Reserved key "${key}" at "${path}" in contract`)
+      throw new SetupError({ code: "reserved-key", key, path })
     }
 
     if (key.includes(".")) {
       // Dotted paths are derived by flatten; a literal dot in a key would
       // silently collide with the equivalent nested tree.
-      throw new Error(`Key "${key}" at "${path}" in contract must not contain "."`)
+      throw new SetupError({ code: "dotted-key", key, path })
     }
   }
 

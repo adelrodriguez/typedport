@@ -3,10 +3,10 @@ import { dirname, join, relative, resolve } from "node:path"
 import { describe, expect, test } from "vitest"
 
 // Each folder may import only from folders that appear in its list. Dependencies point one way:
-// core ← client, server ← wire ← adapters. `client` and `server` are siblings and stay ignorant of
+// core ← client, server ← wire ← adapters (which may also reach core directly). `client` and `server` are siblings and stay ignorant of
 // each other, so either half of the stack can ship without the other.
 const ALLOWED: Record<string, readonly string[]> = {
-  adapters: ["wire"],
+  adapters: ["core", "wire"],
   client: ["core"],
   core: [],
   server: ["core"],

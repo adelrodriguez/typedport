@@ -1,6 +1,7 @@
 import type { Join } from "../core/types"
 import type { Resolver } from "./types"
 import { type Channel, type ContractTree, isChannel, joinPath } from "../core/contract"
+import { SetupError } from "../core/setup-error"
 
 /**
  * One implemented leaf: the dotted path it serves, the resolver, and (as a phantom on the resolver)
@@ -129,16 +130,16 @@ export function flattenFragments(
       const value = Object.hasOwn(node, key) ? node[key] : undefined
 
       if (value === undefined) {
-        throw new Error(`Missing handler for "${path}"`)
+        throw new SetupError({ code: "missing-resolver", path })
       }
 
       if (isChannel(child)) {
         if (!isFragment(value)) {
-          throw new Error(`Handler for "${path}" is not a fragment`)
+          throw new SetupError({ code: "invalid-handler", expected: "fragment", path })
         }
 
         if (value.$path !== path) {
-          throw new Error(`Handler for "${value.$path}" placed at "${path}"`)
+          throw new SetupError({ code: "misplaced-handler", fragmentPath: value.$path, path })
         }
 
         map[path] = value.$resolver
@@ -146,7 +147,7 @@ export function flattenFragments(
       }
 
       if (typeof value !== "object" || value === null) {
-        throw new Error(`Expected a branch of handlers at "${path}"`)
+        throw new SetupError({ code: "invalid-handler", expected: "branch", path })
       }
 
       walk(child, value as Record<string, unknown>, path)
