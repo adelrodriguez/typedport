@@ -169,3 +169,11 @@ function isPathSegment(value: unknown): boolean {
 function isPropertyKey(value: unknown): value is PropertyKey {
   return typeof value === "string" || typeof value === "number" || typeof value === "symbol"
 }
+
+/**
+ * Normalizes a thrown or abort value to an `Error`, keeping it when it already is one (an abort's
+ * default reason, a `DOMException`, is).
+ */
+export function asError(value: unknown): Error {
+  return value instanceof Error ? value : new Error(String(value))
+}

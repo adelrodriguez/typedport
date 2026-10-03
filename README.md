@@ -205,19 +205,36 @@ const api = createClient(contract, async (path, payload) =>
 
 `toWire` takes the operation's promise, or a thunk when the operation can throw synchronously. `fromWire(await toWire(x))` returns what `x` resolved with, or rethrows what it threw.
 
+The far side of a serializing boundary is often a browser, so `toWire` hides failures by default. Caller-fault `ChannelError`s (`validation`, `unknown-channel`, `no-router`) cross intact, since they tell the caller what to fix and reveal nothing about the server. Everything else, including application errors and `output-validation` (whose `issues` describe the server's own data), crosses as a bare `Internal error`. `expose` lets more through, and `onHidden` receives what was hidden, for your logs:
+
+```typescript
+toWire(router.dispatch(path, payload), {
+  expose: (error) => error instanceof NotFoundError,
+  onHidden: (error) => logger.error(error),
+})
+```
+
 **Message pipes have no request/response.** `postMessage`-shaped channels (MessagePorts, workers, WebSockets) need correlation ids, a pending map, timeouts, and teardown. `connect` owns all of that, over a minimal `Wire`, which is anything that can send a value and hand incoming values to a listener:
 
 ```typescript
 import { connect, type Wire } from "typedport/wire"
 
-const { transport, close } = connect(wire, {
+const { transport, close, closed } = connect(wire, {
   router, // serve incoming requests from the peer; omit for a call-only end
   context: session, // per-connection: passed to every dispatch this end serves
   timeoutMs: 5000, // reject a pending call if no response arrives
+  signal: controller.signal, // aborting closes the connection, like close()
 })
+
+const api = createClient(contract, transport)
+await api.$with({ signal: AbortSignal.timeout(1000) }).notes.list() // cancel one call
 ```
 
-`connect` is symmetric. Call it on both ends of a duplex pipe, each with its own router, and each side gets a transport for calling the other. It speaks the envelope internally, so error fidelity comes for free. That also makes it a **trusted-peer** transport: the peer sees every `ChannelError` detail, including server-fault codes like `output-validation`. An untrusted peer (a browser talking to a public server) belongs behind an edge that redacts, like the HTTP recipe. `close(reason?)` rejects everything in flight and every future call. Wire it to whatever liveness signal the pipe has (a window's `closed`, a socket's `close`).
+````
+
+`connect` is symmetric. Call it on both ends of a duplex pipe, each with its own router, and each side gets a transport for calling the other. It speaks the envelope internally, so error fidelity comes for free. Unlike `toWire`, it defaults to exposing every failure, because it's a **trusted-peer** transport (a worker, a MessagePort, your own processes). Pass the same `expose` and `onHidden` options to narrow that.
+
+A call's `{ signal }` rejects that call with `signal.reason` and drops its late reply. The other side's resolver isn't told and runs to completion. `close(reason?)`, or aborting the `signal` passed to `connect`, rejects everything in flight and every future call, and `closed` resolves with that `ChannelError` once it happens. Tie the session to whatever liveness signal the pipe has (a window's `closed`, a socket's `close`).
 
 `connect` also accepts a `Promise<Wire>`, for pipes that aren't ready yet: a port still being handed over, a socket still opening. Calls made in the meantime queue (bounded by `timeoutMs`) and flush when the wire arrives. `close` before arrival wins the race, and a rejected wire promise closes the connection with the rejection as `cause`.
 
@@ -265,7 +282,7 @@ const memory = router.dispatch
 const electron = (path, input) => ipcRenderer.invoke(path, input)
 const queue = async (path, body) => queueClient.publishJSON({ url: `${baseUrl}/${path}`, body })
 const socket = connect(whenOpen(ws).then(webSocket), { timeoutMs: 5000 }).transport
-```
+````
 
 One thing to keep straight: a one-way transport (a queue) paired with a leaf that declares an `output` is a contract error the core cannot catch at runtime. The client would resolve the publish receipt as if it were the result. Keep `output` off the leaves a one-way transport serves, and make the compiler enforce it: adapters built on one-way delivery should constrain their contract parameter to `OneWayContract`, which rejects any tree containing a round-trip leaf.
 
@@ -282,7 +299,7 @@ export const api = createClient(contract, async (path, payload) => (await ready)
 <details>
 <summary><strong>HTTP / fetch</strong>: any framework that speaks Request/Response</summary>
 
-The server edge is a fetch handler (Hono, Next.js route handlers, Bun, and Deno all accept one). The wire envelope carries every outcome, so a `ChannelError` thrown by the router arrives in the browser with its `code` and fields intact:
+The server edge is a fetch handler (Hono, Next.js route handlers, Bun, and Deno all accept one). The wire envelope carries every outcome. Caller-fault `ChannelError`s arrive in the browser with their `code` and fields intact, and `toWire` hides everything else by default:
 
 ```typescript
 import { toWire } from "typedport/wire"
@@ -296,24 +313,15 @@ const handle = async (request: Request): Promise<Response> => {
 
   // JSON has no undefined, so the client sends null for void inputs; map it
   // back so z.void() leaves round-trip.
-  const wire = await toWire(router.dispatch(path, (await request.json()) ?? undefined))
+  const wire = await toWire(router.dispatch(path, (await request.json()) ?? undefined), {
+    onHidden: (error) => console.error(error), // the real failure, for the server's logs
+  })
 
   if (wire.ok) {
     return Response.json(wire, { status: 200 })
   }
 
-  // Only `validation` is the caller's fault. Everything else — an application
-  // error, an off-contract resolver result (`output-validation`) — belongs in
-  // the server's logs, not in a response to an untrusted caller.
-  if (wire.error.detail?.code === "validation") {
-    return Response.json(wire, { status: 400 })
-  }
-
-  console.error(wire.error)
-  return Response.json(
-    { ok: false, error: { message: "Internal server error", name: "Error" } },
-    { status: 500 }
-  )
+  return Response.json(wire, { status: wire.error.detail?.code === "validation" ? 400 : 500 })
 }
 ```
 
@@ -429,7 +437,10 @@ const pushRouter = createRouter(pushContract, {
   // ... resolvers for main → renderer calls
 })
 
-const { transport } = connect(receivePort("typedport:port").then(domPort), {
+// Give up if the port hasn't arrived in 10s; the rejection closes the connection.
+const port = receivePort("typedport:port", { signal: AbortSignal.timeout(10_000) })
+
+const { transport } = connect(port.then(domPort), {
   router: pushRouter,
   timeoutMs: 5_000,
 })
@@ -437,7 +448,7 @@ const { transport } = connect(receivePort("typedport:port").then(domPort), {
 export const api = createClient(contract, transport)
 ```
 
-No ready-handshake exists anywhere. Ports buffer until `start()` (the wires call it once their listener is attached), and `connect` buffers calls until the port lands. Call `attach` before or after `loadURL`: `sendPort` posts immediately when a page has already loaded and waits for `did-finish-load` otherwise (a reload needs a fresh channel, since a transferred port is spent). A `ChannelError` thrown by either router arrives on the other side as a real `ChannelError` with its code and fields. `receivePort` only accepts same-window messages of the agreed type that carry an actual port, which shuts out senders in other windows (an iframe, a compromised `opener`). A script already running in the same window is outside any postMessage guard's reach.
+No ready-handshake exists anywhere. Ports buffer until `start()` (the wires call it once their listener is attached), and `connect` buffers calls until the port lands. Call `attach` before or after `loadURL`: `sendPort` posts immediately when a page has already loaded and waits for `did-finish-load` otherwise (a reload needs a fresh channel, since a transferred port is spent). A `ChannelError` thrown by either router arrives on the other side as a real `ChannelError` with its code and fields. `receivePort` only accepts same-window messages of the agreed type that carry an actual port, which shuts out senders in other windows (an iframe, a compromised `opener`). A script already running in the same window is outside any postMessage guard's reach. `relayPort` posts the port to the window's own origin, so a page that has navigated elsewhere never receives it. `file://` pages have no addressable origin and fall back to `"*"`, and `targetOrigin` overrides both. Both take `{ signal }`: it bounds `receivePort`'s wait and stops `relayPort`'s relay.
 
 Utility processes use the same `mainPort` wire, because their ports are `MessagePortMain`-shaped too:
 

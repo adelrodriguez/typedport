@@ -1,4 +1,5 @@
 import type { Wire } from "../wire/types"
+import { asError } from "../core/error"
 import { isRecord } from "../core/guards"
 import { SetupError } from "../core/setup-error"
 
@@ -124,6 +125,7 @@ export type MessageWindowLike = {
   addEventListener(type: "message", listener: (event: PortMessageEvent) => void): void
   removeEventListener(type: "message", listener: (event: PortMessageEvent) => void): void
   postMessage(message: unknown, targetOrigin: string, transfer?: readonly unknown[]): void
+  location?: { origin: string }
 }
 
 function defaultWindow(caller: string): MessageWindowLike {
@@ -153,11 +155,32 @@ function isMessageWindow(value: unknown): value is MessageWindowLike {
  * and no postMessage protocol can; same-window injection defeats the page wholesale. Feed the
  * result to {@link domPort}; `connect` accepts the pending promise directly:
  * `connect(receivePort("app:port").then(domPort), { router })`.
+ *
+ * A port that never arrives leaves the promise pending; bound the wait with `signal`
+ * (`AbortSignal.timeout(5000)`), which rejects with `signal.reason`. `target` replaces the global
+ * `window`.
  */
-export function receivePort(type: string, target?: MessageWindowLike): Promise<DomPortLike> {
-  const win = target ?? defaultWindow("receivePort")
+export function receivePort(
+  type: string,
+  options: { signal?: AbortSignal; target?: MessageWindowLike } = {}
+): Promise<DomPortLike> {
+  const { signal } = options
+  const win = options.target ?? defaultWindow("receivePort")
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(asError(signal.reason))
+      return
+    }
+
+    const detach = (): void => {
+      win.removeEventListener("message", handle)
+      signal?.removeEventListener("abort", onAbort)
+    }
+    const onAbort = (): void => {
+      detach()
+      reject(asError(signal?.reason))
+    }
     const handle = (event: PortMessageEvent): void => {
       const { data } = event
       const port = event.ports[0]
@@ -168,11 +191,12 @@ export function receivePort(type: string, target?: MessageWindowLike): Promise<D
 
       // Removal is the guard's job, not {once}'s: an unrelated message must not consume the
       // listener before the port arrives.
-      win.removeEventListener("message", handle)
+      detach()
       resolve(port)
     }
 
     win.addEventListener("message", handle)
+    signal?.addEventListener("abort", onAbort, { once: true })
   })
 }
 
@@ -181,23 +205,48 @@ export function receivePort(type: string, target?: MessageWindowLike): Promise<D
  */
 export type PortIpcRendererLike = {
   on(channel: string, listener: (event: { ports: readonly unknown[] }) => void): unknown
+  removeListener(channel: string, listener: (event: { ports: readonly unknown[] }) => void): unknown
 }
 
 /**
  * Preload end of the hand-off: relays every port arriving on the IPC channel `type` into the page,
  * where {@link receivePort} is waiting. `ipcRenderer` is a parameter (not a global) so the preload
- * stays the only module that imports Electron.
+ * stays the only module that imports Electron. Aborting `signal` stops the relay.
+ *
+ * The port is posted to the window's own origin, so a page that has navigated elsewhere never
+ * receives it. Pages with an opaque origin (`file://`, whose origin is `"null"`) can't be addressed
+ * by origin and fall back to `"*"`; `targetOrigin` overrides both. `target` replaces the global
+ * `window`.
  */
 export function relayPort(
   ipcRenderer: PortIpcRendererLike,
   type: string,
-  target?: MessageWindowLike
+  options: { signal?: AbortSignal; target?: MessageWindowLike; targetOrigin?: string } = {}
 ): void {
-  const win = target ?? defaultWindow("relayPort")
+  const { signal } = options
+  const win = options.target ?? defaultWindow("relayPort")
 
-  ipcRenderer.on(type, (event) => {
-    win.postMessage({ type }, "*", event.ports)
-  })
+  if (signal?.aborted) {
+    return
+  }
+
+  const relay = (event: { ports: readonly unknown[] }): void => {
+    win.postMessage({ type }, options.targetOrigin ?? originOf(win), event.ports)
+  }
+
+  ipcRenderer.on(type, relay)
+  signal?.addEventListener(
+    "abort",
+    () => {
+      ipcRenderer.removeListener(type, relay)
+    },
+    { once: true }
+  )
+}
+
+function originOf(win: MessageWindowLike): string {
+  const origin = win.location?.origin
+  return origin && origin !== "null" ? origin : "*"
 }
 
 /**

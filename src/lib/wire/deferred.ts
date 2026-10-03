@@ -1,4 +1,5 @@
 import type { Wire } from "./types"
+import { asError } from "../core/error"
 
 /**
  * A `Wire` over a wire that hasn't arrived yet: outbound data buffers, the listener attaches on
@@ -40,7 +41,7 @@ export function deferWire(
   }
 
   adopt().catch((error: unknown) => {
-    onReject(error instanceof Error ? error : new Error(String(error)))
+    onReject(asError(error))
   })
 
   return {

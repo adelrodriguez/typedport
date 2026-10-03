@@ -125,6 +125,91 @@ describe("connect", () => {
     expect((error as ChannelError).message).toBe("This end does not serve requests")
   })
 
+  test("connect can narrow what the peer sees", async () => {
+    const [serverWire, clientWire] = createWirePair()
+    const hidden: unknown[] = []
+    const router = createRouter(pullContract, {
+      "math.add": () => {
+        throw new Error("internal detail")
+      },
+    })
+
+    connect(serverWire, { expose: () => false, onHidden: (error) => hidden.push(error), router })
+    const api = createClient(pullContract, connect(clientWire).transport)
+
+    await expect(api.math.add({ a: 1, b: 2 })).rejects.toThrow("Internal error")
+    expect(hidden).toHaveLength(1)
+  })
+
+  test("a per-call signal rejects in flight with its reason and drops the late reply", async () => {
+    const [serverWire, clientWire] = createWirePair()
+    let release: ((value: number) => void) | undefined
+    let started: (() => void) | undefined
+    const running = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const router = createRouter(pullContract, {
+      "math.add": () =>
+        new Promise<number>((resolve) => {
+          release = resolve
+          started?.()
+        }),
+    })
+
+    connect(serverWire, { router })
+    const api = createClient(pullContract, connect(clientWire).transport)
+    const controller = new AbortController()
+    const reason = new Error("user navigated away")
+
+    const call = api.$with({ signal: controller.signal }).math.add({ a: 1, b: 2 })
+    await running
+    controller.abort(reason)
+    release?.(3)
+
+    await expect(call).rejects.toBe(reason)
+  })
+
+  test("an already-aborted call signal never sends", async () => {
+    const [wire, peer] = createWirePair()
+    const seen: unknown[] = []
+    peer.onMessage((data) => {
+      seen.push(data)
+    })
+    const { transport } = connect(wire)
+
+    await expect(
+      Promise.resolve(transport("math.add", {}, { signal: AbortSignal.abort() }))
+    ).rejects.toThrow(expect.objectContaining({ name: "AbortError" }) as Error)
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0)
+    })
+    expect(seen).toEqual([])
+  })
+
+  test("a session signal closes the connection and resolves closed", async () => {
+    const [wire] = createWirePair() // the peer never answers
+    const controller = new AbortController()
+    const reason = new Error("window closed")
+    const { closed, transport } = connect(wire, { signal: controller.signal })
+
+    const call = Promise.resolve(transport("math.add", { a: 1, b: 2 }))
+    controller.abort(reason)
+
+    await expect(call).rejects.toThrow(
+      expect.objectContaining({ cause: reason, code: "closed" }) as Error
+    )
+    await expect(closed).resolves.toMatchObject({ cause: reason, code: "closed" })
+  })
+
+  test("closed resolves on close() too", async () => {
+    const [wire] = createWirePair()
+    const { close, closed } = connect(wire)
+
+    close()
+
+    await expect(closed).resolves.toBeInstanceOf(ChannelError)
+  })
+
   test("ignores requests without a numeric id or string path", async () => {
     const [serverWire, peerWire] = createWirePair()
     const seen: unknown[] = []
@@ -391,15 +476,81 @@ describe("toWire / fromWire", () => {
     expect(error?.stack).not.toBe("spoofed")
   })
 
+  test("hides application errors and server-fault codes by default, reporting them to onHidden", async () => {
+    const hidden: unknown[] = []
+    const crash = new Error("db password is hunter2")
+    const drift = new ChannelError({ code: "output-validation", issues: [{ message: "secret" }] })
+
+    const wires = await Promise.all(
+      [crash, drift].map((error) =>
+        toWire(
+          () => {
+            throw error
+          },
+          { onHidden: (e) => hidden.push(e) }
+        )
+      )
+    )
+
+    for (const wire of wires) {
+      expect(wire).toEqual({ error: { message: "Internal error", name: "Error" }, ok: false })
+    }
+
+    expect(hidden).toEqual([crash, drift])
+  })
+
+  test("always exposes caller-fault codes", async () => {
+    const errors = [
+      new ChannelError({ code: "validation", issues: [{ message: "bad" }] }),
+      new ChannelError({ code: "unknown-channel", path: "nope" }),
+      new ChannelError({ code: "no-router" }),
+    ]
+
+    const wires = await Promise.all(
+      errors.map((error) =>
+        toWire(
+          () => {
+            throw error
+          },
+          { expose: () => false }
+        )
+      )
+    )
+
+    expect(wires.map((wire) => !wire.ok && wire.error.detail?.code)).toEqual([
+      "validation",
+      "unknown-channel",
+      "no-router",
+    ])
+  })
+
+  test("exposes whatever the predicate accepts", async () => {
+    class NotFoundError extends Error {
+      override name = "NotFoundError"
+    }
+
+    const wire = await toWire(
+      () => {
+        throw new NotFoundError("no todo 42")
+      },
+      { expose: (error) => error instanceof NotFoundError }
+    )
+
+    expect(wire).toEqual({ error: { message: "no todo 42", name: "NotFoundError" }, ok: false })
+  })
+
   test("captures operations that are not dispatch, including sync throws", async () => {
     await expect(toWire(Promise.resolve("receipt"))).resolves.toEqual({
       ok: true,
       result: "receipt",
     })
 
-    const wire = await toWire(() => {
-      throw new Error("sync explosion")
-    })
+    const wire = await toWire(
+      () => {
+        throw new Error("sync explosion")
+      },
+      { expose: () => true }
+    )
 
     expect(wire).toEqual({
       error: { message: "sync explosion", name: "Error" },

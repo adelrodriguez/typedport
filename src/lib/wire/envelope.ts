@@ -15,17 +15,60 @@ export type WireResult =
     }
 
 /**
+ * Which failures `toWire` lets through with their real message and detail. Caller-fault
+ * `ChannelError`s always pass — `validation` (with its `issues`), `unknown-channel`, and
+ * `no-router` tell the caller what to fix and reveal nothing about the server — so the predicate
+ * only decides the rest: application errors, and server-fault codes like `output-validation`, whose
+ * `issues` describe the server's own data.
+ */
+export type ExposeOptions = {
+  /**
+   * Returns `true` for a failure the peer may see as-is: `(error) => error instanceof NotFound`.
+   */
+  expose?: (error: unknown) => boolean
+  /**
+   * Receives every failure that was hidden, for the server's own logs.
+   */
+  onHidden?: (error: unknown) => void
+}
+
+const CALLER_FAULT_CODES: ReadonlySet<ChannelErrorDetail["code"]> = new Set([
+  "no-router",
+  "unknown-channel",
+  "validation",
+])
+
+const HIDDEN = { message: "Internal error", name: "Error" } as const
+
+/**
  * Captures any operation's outcome as a serializable `WireResult` — never throws. Pass the
  * operation's promise (`toWire(router.dispatch(path, payload))`), or a thunk when the operation can
  * throw synchronously. `fromWire` on the other side is its inverse: `fromWire(await toWire(x))`
  * returns what `x` resolved with, or rethrows what it threw.
+ *
+ * Failures are hidden by default: anything but a caller-fault `ChannelError` crosses as a bare
+ * `Internal error`, because the far side of a serializing boundary is often a browser. Widen it
+ * with `expose`, and log what was hidden with `onHidden` — see {@link ExposeOptions}.
  */
-export async function toWire(operation: Promise<unknown> | (() => unknown)): Promise<WireResult> {
+export async function toWire(
+  operation: Promise<unknown> | (() => unknown),
+  options: ExposeOptions = {}
+): Promise<WireResult> {
   try {
     return { ok: true, result: await (typeof operation === "function" ? operation() : operation) }
   } catch (error) {
-    return { error: serializeError(error), ok: false }
+    if (isCallerFault(error) || options.expose?.(error) === true) {
+      return { error: serializeError(error), ok: false }
+    }
+
+    options.onHidden?.(error)
+
+    return { error: { ...HIDDEN }, ok: false }
   }
+}
+
+function isCallerFault(error: unknown): boolean {
+  return error instanceof ChannelError && CALLER_FAULT_CODES.has(error.code)
 }
 
 /**
@@ -88,7 +131,7 @@ function parseEnvelope(data: unknown): WireResult | undefined {
   return parsed ? { error: { detail: parsed, message, name }, ok: false } : undefined
 }
 
-export function serializeError(error: unknown): Exclude<WireResult, { ok: true }>["error"] {
+function serializeError(error: unknown): Exclude<WireResult, { ok: true }>["error"] {
   if (error instanceof ChannelError) {
     return { detail: detailOf(error), message: error.message, name: error.name }
   }

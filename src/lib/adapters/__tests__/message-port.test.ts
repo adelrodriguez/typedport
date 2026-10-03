@@ -14,6 +14,7 @@ import {
   type DomPortLike,
   type MainPortLike,
   type MessageWindowLike,
+  type PortIpcRendererLike,
   type NodePortLike,
 } from "../message-port"
 
@@ -171,7 +172,7 @@ describe("nodePort", () => {
 
 type WindowMessage = { message: unknown; targetOrigin: string; transfer: readonly unknown[] }
 
-function createFakeWindow(): {
+function createFakeWindow(origin?: string): {
   window: MessageWindowLike
   emit: (event: { data: unknown; ports: readonly DomPortLike[]; source: unknown }) => void
   posted: WindowMessage[]
@@ -194,6 +195,7 @@ function createFakeWindow(): {
       addEventListener: (_type, listener) => {
         listeners.push(listener)
       },
+      ...(origin === undefined ? {} : { location: { origin } }),
       postMessage: (message, targetOrigin, transfer = []) => {
         posted.push({ message, targetOrigin, transfer })
       },
@@ -209,7 +211,7 @@ describe("receivePort", () => {
     const fake = createFakeWindow()
     const { dom } = createPortPair()
 
-    const received = receivePort("app:port", fake.window)
+    const received = receivePort("app:port", { target: fake.window })
 
     // An injected script posting from elsewhere must not be able to substitute a port.
     fake.emit({ data: { type: "app:port" }, ports: [dom], source: { not: "the window" } })
@@ -228,27 +230,94 @@ describe("receivePort", () => {
   })
 })
 
-describe("relayPort", () => {
-  test("reposts ports from the IPC channel into the page", () => {
+describe("receivePort with a signal", () => {
+  test("rejects with the abort reason and detaches its listener", async () => {
     const fake = createFakeWindow()
-    const { dom } = createPortPair()
+    const controller = new AbortController()
+    const reason = new Error("gave up")
 
-    const handlers = new Map<string, (event: { ports: readonly unknown[] }) => void>()
-    relayPort(
-      {
-        on: (channel, listener) => {
-          handlers.set(channel, listener)
-        },
+    const received = receivePort("app:port", { signal: controller.signal, target: fake.window })
+    controller.abort(reason)
+
+    await expect(received).rejects.toBe(reason)
+    expect(fake.listenerCount()).toBe(0)
+  })
+
+  test("rejects immediately for an already-aborted signal", async () => {
+    const fake = createFakeWindow()
+
+    await expect(
+      receivePort("app:port", { signal: AbortSignal.abort(), target: fake.window })
+    ).rejects.toThrow(expect.objectContaining({ name: "AbortError" }) as Error)
+    expect(fake.listenerCount()).toBe(0)
+  })
+})
+
+function createFakeIpc(): {
+  ipc: PortIpcRendererLike
+  deliver: (ports: readonly unknown[]) => void
+} {
+  const handlers = new Map<string, (event: { ports: readonly unknown[] }) => void>()
+
+  return {
+    deliver: (ports) => handlers.get("app:port")?.({ ports }),
+    ipc: {
+      on: (channel, listener) => {
+        handlers.set(channel, listener)
       },
-      "app:port",
-      fake.window
-    )
+      removeListener: (channel, listener) => {
+        if (handlers.get(channel) === listener) {
+          handlers.delete(channel)
+        }
+      },
+    },
+  }
+}
 
-    handlers.get("app:port")?.({ ports: [dom] })
+describe("relayPort", () => {
+  test("reposts ports from the IPC channel to the window's own origin", () => {
+    const fake = createFakeWindow("https://app.local")
+    const { dom } = createPortPair()
+    const { deliver, ipc } = createFakeIpc()
+
+    relayPort(ipc, "app:port", { target: fake.window })
+    deliver([dom])
 
     expect(fake.posted).toEqual([
-      { message: { type: "app:port" }, targetOrigin: "*", transfer: [dom] },
+      { message: { type: "app:port" }, targetOrigin: "https://app.local", transfer: [dom] },
     ])
+  })
+
+  test.each([["null"], [undefined]])("falls back to * when the origin is %s", (origin) => {
+    const fake = createFakeWindow(origin)
+    const { deliver, ipc } = createFakeIpc()
+
+    relayPort(ipc, "app:port", { target: fake.window })
+    deliver([])
+
+    expect(fake.posted[0]?.targetOrigin).toBe("*")
+  })
+
+  test("lets targetOrigin override the default", () => {
+    const fake = createFakeWindow("https://app.local")
+    const { deliver, ipc } = createFakeIpc()
+
+    relayPort(ipc, "app:port", { target: fake.window, targetOrigin: "https://other.local" })
+    deliver([])
+
+    expect(fake.posted[0]?.targetOrigin).toBe("https://other.local")
+  })
+
+  test("stops relaying once the signal aborts", () => {
+    const fake = createFakeWindow("https://app.local")
+    const { deliver, ipc } = createFakeIpc()
+    const controller = new AbortController()
+
+    relayPort(ipc, "app:port", { signal: controller.signal, target: fake.window })
+    controller.abort()
+    deliver([])
+
+    expect(fake.posted).toEqual([])
   })
 })
 
