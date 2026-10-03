@@ -88,3 +88,15 @@ jobs:
           sleep 2
           pnpm tsx examples/websocket/client.ts
           kill %1
+
+      - name: Run QStash example
+        run: |
+          npx -y @upstash/qstash-cli dev &
+          pnpm tsx examples/qstash/server.ts > server.log 2>&1 &
+          sleep 5
+          pnpm tsx examples/qstash/client.ts
+          sleep 10
+          cat server.log
+          grep -q "welcome email sent" server.log
+          grep -q "report rep_123 ready" server.log
+          kill %1 %2
