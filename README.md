@@ -205,7 +205,7 @@ const api = createClient(contract, async (path, payload) =>
 
 `toWire` takes the operation's promise, or a thunk when the operation can throw synchronously. `fromWire(await toWire(x))` returns what `x` resolved with, or rethrows what it threw.
 
-The far side of a serializing boundary is often a browser, so `toWire` hides failures by default. Caller-fault `ChannelError`s (`validation`, `unknown-channel`, `no-router`) cross intact, since they tell the caller what to fix and reveal nothing about the server. Everything else, including application errors and `output-validation` (whose `issues` describe the server's own data), crosses as a bare `Internal error`. `expose` lets more through, and `onHidden` receives what was hidden, for your logs:
+The far side of a serializing boundary is often a browser, so `toWire` hides failures by default. Caller-fault `ChannelError`s (`validation`, `unknown-channel`, `no-router`) cross intact, since they tell the caller what to fix and reveal nothing about the server. Everything else, including application errors and `output-validation` (whose `issues` describe the server's own data), crosses as a `ChannelError` with code `internal`, so the client can still branch on it. `expose` lets more through, and `onHidden` receives what was hidden, for your logs:
 
 ```typescript
 toWire(router.dispatch(path, payload), {
@@ -232,7 +232,7 @@ await api.$with({ signal: AbortSignal.timeout(1000) }).notes.list() // cancel on
 
 ````
 
-`connect` is symmetric. Call it on both ends of a duplex pipe, each with its own router, and each side gets a transport for calling the other. It speaks the envelope internally, so error fidelity comes for free. Unlike `toWire`, it defaults to exposing every failure, because it's a **trusted-peer** transport (a worker, a MessagePort, your own processes). Pass the same `expose` and `onHidden` options to narrow that.
+`connect` is symmetric. Call it on both ends of a duplex pipe, each with its own router, and each side gets a transport for calling the other. It speaks the envelope internally, so error fidelity comes for free. It hides failures the same way `toWire` does and takes the same `expose` and `onHidden` options. A trusted peer (a worker, your own processes) can see everything with `expose: () => true`.
 
 A call's `{ signal }` rejects that call with `signal.reason` and drops its late reply. The other side's resolver isn't told and runs to completion. `close(reason?)`, or aborting the `signal` passed to `connect`, rejects everything in flight and every future call, and `closed` resolves with that `ChannelError` once it happens. Tie the session to whatever liveness signal the pipe has (a window's `closed`, a socket's `close`).
 

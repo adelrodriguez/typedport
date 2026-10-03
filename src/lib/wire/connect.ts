@@ -1,7 +1,7 @@
 import type { Transport } from "../core/transport"
 import type { Router } from "../server/router"
 import type { Wire } from "./types"
-import { asError, ChannelError } from "../core/error"
+import { ChannelError } from "../core/error"
 import { isRecord } from "../core/guards"
 import { deferWire, subscribe } from "./deferred"
 import { type ExposeOptions, fromWire, toWire } from "./envelope"
@@ -12,7 +12,7 @@ type WireMessage =
   | { kind: "res"; id: number; result: unknown }
 
 type PendingEntry = {
-  fail: (error: unknown) => void
+  fail: (error: ChannelError) => void
   settle: (result: unknown) => void
 }
 
@@ -32,13 +32,13 @@ type CallOptions = {
  * A pipe is one peer, so `context` is per-connection: whatever identity the edge established (the
  * session, the window) is passed to every dispatch this end serves.
  *
- * `connect` is a trusted-peer transport (a worker, a MessagePort, your own processes), so by
- * default the peer receives every failure as-is, including server-fault codes like
- * `output-validation` and application errors. Narrow it with `expose` and `onHidden`, which behave
- * as on `toWire`.
+ * Failures this end serves are hidden from the peer exactly as `toWire` hides them: caller-fault
+ * codes cross intact, everything else crosses as code `internal` and goes to `onHidden`. A trusted
+ * peer (a worker, your own processes) can see everything with `expose: () => true`.
  *
  * `timeoutMs` bounds each outgoing call; without it a dead peer leaves calls pending forever. The
- * transport also takes `{ signal }` per call, so `api.$with({ signal })` cancels from the client.
+ * transport also takes `{ signal }` per call, so `api.$with({ signal })` cancels from the client;
+ * the call rejects with `signal.reason`.
  *
  * The session ends on `close(reason?)` or when `options.signal` aborts (its reason becomes the
  * close reason): everything in flight and every future call rejects with a `ChannelError` (code
@@ -60,7 +60,7 @@ export function connect<Context = void>(
     timeoutMs?: number
   } = {}
 ): {
-  close: (reason?: Error) => void
+  close: (reason?: unknown) => void
   closed: Promise<ChannelError>
   transport: Transport<CallOptions>
 } {
@@ -80,11 +80,7 @@ export function connect<Context = void>(
             return message?.kind !== "req" || pending.has(message.id)
           }
         )
-  const { context, router, signal, timeoutMs } = options
-  const exposure: ExposeOptions = {
-    expose: options.expose ?? exposeAll,
-    onHidden: options.onHidden,
-  }
+  const { context, router, signal, timeoutMs, ...exposure } = options
   // oxlint-disable-next-line typescript/consistent-type-assertions -- `Router<Context>`'s rest tuple is a conditional TypeScript cannot resolve for a generic Context
   const dispatch = router?.dispatch as
     | ((path: string, raw: unknown, context?: Context) => Promise<unknown>)
@@ -112,10 +108,10 @@ export function connect<Context = void>(
   })
 
   const onAbort = (): void => {
-    close(asError(signal?.reason))
+    close(signal?.reason)
   }
 
-  function close(reason?: Error): void {
+  function close(reason?: unknown): void {
     if (closed) {
       return
     }
@@ -150,10 +146,8 @@ export function connect<Context = void>(
           return
         }
 
-        if (callSignal?.aborted) {
-          reject(asError(callSignal.reason))
-          return
-        }
+        // Throwing in the executor rejects with the raw reason, as fetch does.
+        callSignal?.throwIfAborted()
 
         const id = nextId
         nextId += 1
@@ -165,7 +159,8 @@ export function connect<Context = void>(
         }
         const onCallAbort = (): void => {
           cleanup()
-          reject(asError(callSignal?.reason))
+          // oxlint-disable-next-line prefer-promise-reject-errors -- an abort rejects with the caller's own reason, as fetch does
+          reject(callSignal?.reason)
         }
         const timer =
           timeoutMs === undefined
@@ -177,18 +172,15 @@ export function connect<Context = void>(
 
         callSignal?.addEventListener("abort", onCallAbort, { once: true })
         pending.set(id, {
-          fail: (error) => {
+          fail: (error: ChannelError) => {
             cleanup()
-            reject(asError(error))
+            reject(error)
           },
           settle: (result) => {
             cleanup()
 
-            try {
-              resolve(fromWire(result))
-            } catch (error) {
-              reject(asError(error))
-            }
+            // Adopting a promise carries fromWire's throw through as the rejection.
+            resolve(Promise.resolve(result).then(fromWire))
           },
         })
 
@@ -222,10 +214,6 @@ export function connect<Context = void>(
       }
     }
   }
-}
-
-function exposeAll(): boolean {
-  return true
 }
 
 function parseMessage(data: unknown): WireMessage | undefined {

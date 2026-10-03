@@ -15,11 +15,12 @@ export type WireResult =
     }
 
 /**
- * Which failures `toWire` lets through with their real message and detail. Caller-fault
- * `ChannelError`s always pass — `validation` (with its `issues`), `unknown-channel`, and
- * `no-router` tell the caller what to fix and reveal nothing about the server — so the predicate
- * only decides the rest: application errors, and server-fault codes like `output-validation`, whose
- * `issues` describe the server's own data.
+ * Which failures `toWire` and `connect` let through with their real message and detail.
+ * Caller-fault `ChannelError`s always pass — `validation` (with its `issues`), `unknown-channel`,
+ * and `no-router` tell the caller what to fix and reveal nothing about the server — so the
+ * predicate only decides the rest: application errors, and server-fault codes like
+ * `output-validation`, whose `issues` describe the server's own data. A hidden failure crosses as a
+ * `ChannelError` with code `internal`.
  */
 export type ExposeOptions = {
   /**
@@ -32,13 +33,14 @@ export type ExposeOptions = {
   onHidden?: (error: unknown) => void
 }
 
-const CALLER_FAULT_CODES: ReadonlySet<ChannelErrorDetail["code"]> = new Set([
+// Codes that reveal nothing about the server. `internal` is here so a relayed hidden failure
+// passes through instead of being reported to `onHidden` a second time.
+const ALWAYS_EXPOSED: ReadonlySet<ChannelErrorDetail["code"]> = new Set([
+  "internal",
   "no-router",
   "unknown-channel",
   "validation",
 ])
-
-const HIDDEN = { message: "Internal error", name: "Error" } as const
 
 /**
  * Captures any operation's outcome as a serializable `WireResult` — never throws. Pass the
@@ -46,9 +48,10 @@ const HIDDEN = { message: "Internal error", name: "Error" } as const
  * throw synchronously. `fromWire` on the other side is its inverse: `fromWire(await toWire(x))`
  * returns what `x` resolved with, or rethrows what it threw.
  *
- * Failures are hidden by default: anything but a caller-fault `ChannelError` crosses as a bare
- * `Internal error`, because the far side of a serializing boundary is often a browser. Widen it
- * with `expose`, and log what was hidden with `onHidden` — see {@link ExposeOptions}.
+ * Failures are hidden by default: anything but a caller-fault `ChannelError` crosses as a
+ * `ChannelError` with code `internal`, because the far side of a serializing boundary is often a
+ * browser. Widen it with `expose`, and log what was hidden with `onHidden` — see
+ * {@link ExposeOptions}.
  */
 export async function toWire(
   operation: Promise<unknown> | (() => unknown),
@@ -57,18 +60,18 @@ export async function toWire(
   try {
     return { ok: true, result: await (typeof operation === "function" ? operation() : operation) }
   } catch (error) {
-    if (isCallerFault(error) || options.expose?.(error) === true) {
+    if (isAlwaysExposed(error) || options.expose?.(error) === true) {
       return { error: serializeError(error), ok: false }
     }
 
     options.onHidden?.(error)
 
-    return { error: { ...HIDDEN }, ok: false }
+    return { error: serializeError(new ChannelError({ code: "internal" })), ok: false }
   }
 }
 
-function isCallerFault(error: unknown): boolean {
-  return error instanceof ChannelError && CALLER_FAULT_CODES.has(error.code)
+function isAlwaysExposed(error: unknown): boolean {
+  return error instanceof ChannelError && ALWAYS_EXPOSED.has(error.code)
 }
 
 /**

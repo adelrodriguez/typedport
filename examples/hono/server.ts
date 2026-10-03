@@ -56,7 +56,7 @@ const respond = async (c: Context, path: string, input: unknown) => {
 
   // toWire hides everything but caller-fault errors by default: an application
   // error or a resolver result that drifted off contract (`output-validation`)
-  // crosses as a bare "Internal error", and the real one goes to onHidden.
+  // crosses as a ChannelError with code "internal", and the real one goes to onHidden.
   const wire = await toWire(router.dispatch(path, input ?? undefined), {
     onHidden: (error) => {
       console.error(`resolver failed for "${path}":`, error)

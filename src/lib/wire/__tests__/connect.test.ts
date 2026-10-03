@@ -91,7 +91,7 @@ describe("connect", () => {
     expect(channelError.issues.length).toBeGreaterThan(0)
   })
 
-  test("carries resolver crashes as plain errors", async () => {
+  test("hides resolver crashes as code internal by default", async () => {
     const [serverWire, clientWire] = createWirePair()
     const router = createRouter(pullContract, {
       "math.add": () => {
@@ -99,6 +99,21 @@ describe("connect", () => {
       },
     })
     connect(serverWire, { router })
+    const { transport } = connect(clientWire)
+
+    await expect(Promise.resolve(transport("math.add", { a: 1, b: 2 }))).rejects.toThrow(
+      expect.objectContaining({ code: "internal", message: "Internal error" }) as Error
+    )
+  })
+
+  test("carries resolver crashes as plain errors to a trusted peer", async () => {
+    const [serverWire, clientWire] = createWirePair()
+    const router = createRouter(pullContract, {
+      "math.add": () => {
+        throw new Error("resolver exploded")
+      },
+    })
+    connect(serverWire, { expose: () => true, router })
     const { transport } = connect(clientWire)
 
     const error = await Promise.resolve(transport("math.add", { a: 1, b: 2 })).catch(
@@ -167,6 +182,17 @@ describe("connect", () => {
     release?.(3)
 
     await expect(call).rejects.toBe(reason)
+  })
+
+  test("rejects with the raw abort reason, even when it is not an Error", async () => {
+    const [wire] = createWirePair()
+    const { transport } = connect(wire)
+    const controller = new AbortController()
+
+    const call = Promise.resolve(transport("math.add", {}, { signal: controller.signal }))
+    controller.abort("navigated away")
+
+    await expect(call).rejects.toBe("navigated away")
   })
 
   test("an already-aborted call signal never sends", async () => {
@@ -493,7 +519,11 @@ describe("toWire / fromWire", () => {
     )
 
     for (const wire of wires) {
-      expect(wire).toEqual({ error: { message: "Internal error", name: "Error" }, ok: false })
+      expect(wire).toEqual({
+        error: { detail: { code: "internal" }, message: "Internal error", name: "ChannelError" },
+        ok: false,
+      })
+      expect(() => fromWire(wire)).toThrow(expect.objectContaining({ code: "internal" }) as Error)
     }
 
     expect(hidden).toEqual([crash, drift])

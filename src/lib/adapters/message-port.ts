@@ -1,5 +1,4 @@
 import type { Wire } from "../wire/types"
-import { asError } from "../core/error"
 import { isRecord } from "../core/guards"
 import { SetupError } from "../core/setup-error"
 
@@ -168,10 +167,8 @@ export function receivePort(
   const win = options.target ?? defaultWindow("receivePort")
 
   return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(asError(signal.reason))
-      return
-    }
+    // Throwing in the executor rejects with the raw reason, as fetch does.
+    signal?.throwIfAborted()
 
     const detach = (): void => {
       win.removeEventListener("message", handle)
@@ -179,7 +176,8 @@ export function receivePort(
     }
     const onAbort = (): void => {
       detach()
-      reject(asError(signal?.reason))
+      // oxlint-disable-next-line prefer-promise-reject-errors -- an abort rejects with the caller's own reason, as fetch does
+      reject(signal?.reason)
     }
     const handle = (event: PortMessageEvent): void => {
       const { data } = event
