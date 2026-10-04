@@ -1,13 +1,13 @@
 import { MessageChannel } from "node:worker_threads"
 import * as v from "valibot"
 import { describe, expect, expectTypeOf, test } from "vitest"
-import { createClient } from "../client"
-import { defineContract, channel } from "../contract"
-import { ChannelError } from "../error"
-import { implement } from "../implement"
-import { nodePort } from "../message-port"
-import { createRouter } from "../router"
-import { connect } from "../wire"
+import { nodePort } from "../adapters/message-port"
+import { createClient } from "../client/client"
+import { defineContract, channel } from "../core/contract"
+import { ChannelError } from "../core/error"
+import { implement } from "../server/implement"
+import { createRouter } from "../server/router"
+import { connect } from "../wire/connect"
 
 const contract = defineContract({
   notes: {
