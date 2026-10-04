@@ -1,4 +1,5 @@
-import type { Wire } from "./wire"
+import type { Wire } from "../wire/types"
+import { ChannelError } from "../core/error"
 
 /**
  * The shape both socket families share: the browser/Node built-in `WebSocket` and the `ws`
@@ -14,9 +15,10 @@ export type WebSocketLike = {
   removeEventListener(type: "open" | "close" | "error", listener: () => void): void
 }
 
-// WebSocket.OPEN — a static on the class, so the constant is restated here rather than reached
-// through a constructor the structural type deliberately doesn't require.
+// WebSocket.OPEN and .CLOSED — statics on the class, so the constants are restated here rather
+// than reached through a constructor the structural type deliberately doesn't require.
 const OPEN = 1
+const CLOSED = 3
 
 /**
  * Wraps a WebSocket as a `Wire`. Sockets carry frames, not values, so the wire envelope rides JSON
@@ -30,7 +32,8 @@ export function webSocket(socket: WebSocketLike): Wire {
   return {
     onMessage: (listener) => {
       const handle = (event: { data: unknown }): void => {
-        // Text frames arrive as strings in browsers and Buffers from `ws`.
+        // Text frames arrive as strings; String() also recovers text from a Buffer. Anything else
+        // is a binary frame, which this protocol never sends and the parse below drops.
         const raw = typeof event.data === "string" ? event.data : String(event.data)
 
         let data: unknown
@@ -63,8 +66,9 @@ export function webSocket(socket: WebSocketLike): Wire {
 
 /**
  * Resolves with the socket once it can send — immediately if it already can. Rejects if the socket
- * errors or closes before opening, so a dead endpoint fails loudly instead of leaving the promise
- * (and everything `connect` queued behind it) pending forever.
+ * errors or closes before opening, or has already closed, so a dead endpoint fails loudly instead
+ * of leaving the promise (and everything `connect` queued behind it) pending forever. The rejection
+ * is a `ChannelError` with code `closed`; `cause` says whether the socket errored or closed.
  *
  * The listeners detach once the promise settles, so a `ws` socket keeps Node's
  * throw-on-unhandled-`error` default after it opens. Attach your own `error` listener there.
@@ -72,6 +76,13 @@ export function webSocket(socket: WebSocketLike): Wire {
 export function whenOpen<Socket extends WebSocketLike>(socket: Socket): Promise<Socket> {
   if (socket.readyState === OPEN) {
     return Promise.resolve(socket)
+  }
+
+  // A closed socket emits nothing more, so waiting for `close` would hang forever. A *closing* one
+  // still will — `ws` emits `error` on the next tick when closed mid-handshake, and an unheard
+  // `error` kills the process — so it takes the listener path below.
+  if (socket.readyState === CLOSED) {
+    return Promise.reject(notOpened("closed"))
   }
 
   return new Promise((resolve, reject) => {
@@ -89,15 +100,21 @@ export function whenOpen<Socket extends WebSocketLike>(socket: Socket): Promise<
     }
     const onError = (): void => {
       detach()
-      reject(new Error("Socket failed before opening"))
+      reject(notOpened("errored"))
     }
     const onClose = (): void => {
       detach()
-      reject(new Error("Socket closed before opening"))
+      reject(notOpened("closed"))
     }
 
     socket.addEventListener("open", onOpen)
     socket.addEventListener("error", onError)
     socket.addEventListener("close", onClose)
   })
+}
+
+// A socket that never opens is a wire torn down before its first message — a condition callers
+// handle (retry, reconnect), so it is a ChannelError `closed`, like a wire closed later on.
+function notOpened(how: "closed" | "errored"): ChannelError {
+  return new ChannelError({ code: "closed" }, { cause: new Error(`Socket ${how} before opening`) })
 }

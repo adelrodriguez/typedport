@@ -168,7 +168,7 @@ const raw = await api.localFiles.open()
 const file = await parseWith(api.localFiles.open.$output, raw) // now a guarantee, not a claim
 ```
 
-Every failure the library raises is a `ChannelError`, discriminated by `code`: `validation` (the caller's input failed, with the Standard Schema `issues`), `output-validation` (the resolver's result drifted off contract, which is the server's fault, not the caller's), `unknown-channel` (with the `path`), the `connect` lifecycle codes `timeout`, `closed`, and `no-router`, and `malformed-envelope` (`fromWire` got something that isn't an envelope). One `instanceof`, then `code` narrows the fields. Anything that is _not_ a `ChannelError` came from application code:
+Every failure of a call is a `ChannelError`, discriminated by `code`: `validation` (the caller's input failed, with the Standard Schema `issues`), `output-validation` (the resolver's result drifted off contract, which is the server's fault, not the caller's), `unknown-channel` (with the `path`), the `connect` lifecycle codes `timeout`, `closed` (also raised by `whenOpen` for a socket that never opened), and `no-router`, and `malformed-envelope` (`fromWire` got something that isn't an envelope). One `instanceof`, then `code` narrows the fields. Mistakes in wiring things up (a reserved contract key, a missing resolver, a port hand-off with no window) throw a `SetupError` instead, with its own `code`s. It never crosses the wire. Anything that is neither came from application code:
 
 ```typescript
 import { ChannelError } from "typedport"

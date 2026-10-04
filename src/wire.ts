@@ -1,1 +1,3 @@
-export { connect, fromWire, toWire, type Wire, type WireResult } from "./lib/wire"
+export { connect } from "./lib/wire/connect"
+export { fromWire, toWire, type WireResult } from "./lib/wire/envelope"
+export type { Wire } from "./lib/wire/types"

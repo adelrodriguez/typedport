@@ -10,11 +10,9 @@ export async function parseWith<Schema extends StandardSchemaV1>(
   schema: Schema,
   value: unknown
 ): Promise<StandardSchemaV1.InferOutput<Schema>> {
-  let result = schema["~standard"].validate(value)
-
-  if (result instanceof Promise) {
-    result = await result
-  }
+  // Awaited unconditionally: an `instanceof Promise` check misses thenables from another realm or
+  // a non-native promise implementation.
+  const result = await schema["~standard"].validate(value)
 
   if (result.issues) {
     throw new ChannelError({ code: "validation", issues: result.issues })

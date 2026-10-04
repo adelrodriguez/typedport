@@ -11,4 +11,4 @@ export {
   type NodePortLike,
   type PortIpcRendererLike,
   type PortWindowLike,
-} from "../lib/message-port"
+} from "../lib/adapters/message-port"

@@ -1,10 +1,12 @@
 import { describe, expect, test, vi } from "vitest"
 import * as z from "zod"
-import { createClient } from "../client"
-import { defineContract, channel } from "../contract"
-import { ChannelError } from "../error"
-import { createRouter } from "../router"
-import { connect, fromWire, toWire, type Wire } from "../wire"
+import type { Wire } from "../types"
+import { createClient } from "../../client/client"
+import { defineContract, channel } from "../../core/contract"
+import { ChannelError } from "../../core/error"
+import { createRouter } from "../../server/router"
+import { connect } from "../connect"
+import { fromWire, toWire } from "../envelope"
 
 // An in-memory duplex pipe. Cloning every message (as postMessage would)
 // asserts the protocol survives serializing boundaries, not shared references.
@@ -123,6 +125,31 @@ describe("connect", () => {
     expect((error as ChannelError).message).toBe("This end does not serve requests")
   })
 
+  test("ignores requests without a numeric id or string path", async () => {
+    const [serverWire, peerWire] = createWirePair()
+    const seen: unknown[] = []
+    let calls = 0
+    const router = createRouter(pullContract, {
+      "math.add": ({ a, b }) => {
+        calls += 1
+        return a + b
+      },
+    })
+
+    connect(serverWire, { router })
+    peerWire.onMessage((data) => {
+      seen.push(data)
+    })
+    peerWire.send({ id: "1", kind: "req", path: "math.add", payload: { a: 1, b: 2 } })
+    peerWire.send({ id: 2, kind: "req", path: ["math", "add"], payload: { a: 1, b: 2 } })
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0)
+    })
+
+    expect(calls).toBe(0)
+    expect(seen).toEqual([])
+  })
+
   test("times out calls the peer never answers", async () => {
     const [wire] = createWirePair() // peer end never connected
     const { transport } = connect(wire, { timeoutMs: 20 })
@@ -203,6 +230,13 @@ describe("connect", () => {
   })
 })
 
+// An array of empty slots, as `new Array(length)` makes, which structured clone preserves.
+function holes(length: number): unknown[] {
+  const array: unknown[] = []
+  array.length = length
+  return array
+}
+
 describe("toWire / fromWire", () => {
   const router = createRouter(pullContract, {
     "math.add": ({ a, b }) => a + b,
@@ -253,6 +287,108 @@ describe("toWire / fromWire", () => {
       expect(error).toBeInstanceOf(ChannelError)
       expect((error as ChannelError).code).toBe("malformed-envelope")
     }
+  })
+
+  test("rejects forged or mistyped error details as malformed-envelope", () => {
+    for (const forged of [
+      { error: { detail: { code: "made-up" }, message: "x", name: "ChannelError" }, ok: false },
+      {
+        error: { detail: { code: "validation", issues: "nope" }, message: "x", name: "E" },
+        ok: false,
+      },
+      {
+        error: { detail: { code: "timeout", path: 1, timeoutMs: 5 }, message: "x", name: "E" },
+        ok: false,
+      },
+      { error: { message: 42, name: "Error" }, ok: false },
+    ]) {
+      expect(() => fromWire(forged)).toThrow(
+        expect.objectContaining({ code: "malformed-envelope" }) as Error
+      )
+    }
+  })
+
+  test.each([
+    ["an object path", { path: {} }],
+    ["a null segment", { path: [null] }],
+    ["a segment without a key", { path: [{ name: "a" }] }],
+    // Structured clone keeps empty slots, and `every` would skip them.
+    ["a sparse path", { path: structuredClone(holes(1)) }],
+  ])("rejects issues with %s as malformed-envelope", (_name, extra) => {
+    for (const code of ["validation", "output-validation"]) {
+      expect(() =>
+        fromWire({
+          error: {
+            detail: { code, issues: [{ message: "bad", ...extra }] },
+            message: "bad",
+            name: "ChannelError",
+          },
+          ok: false,
+        })
+      ).toThrow(expect.objectContaining({ code: "malformed-envelope" }) as Error)
+    }
+  })
+
+  test("rejects a sparse issues list as malformed-envelope", () => {
+    expect(() =>
+      fromWire({
+        error: {
+          detail: { code: "validation", issues: structuredClone(holes(1)) },
+          message: "bad",
+          name: "ChannelError",
+        },
+        ok: false,
+      })
+    ).toThrow(expect.objectContaining({ code: "malformed-envelope" }) as Error)
+  })
+
+  test("rejects a huge sparse path at once, without allocating its length", () => {
+    // Compact under structured clone, but `Array.from` would try to build 2³² − 1 slots.
+    const path = structuredClone(holes(2 ** 32 - 1))
+
+    expect(() =>
+      fromWire({
+        error: {
+          detail: { code: "validation", issues: [{ message: "bad", path }] },
+          message: "bad",
+          name: "ChannelError",
+        },
+        ok: false,
+      })
+    ).toThrow(expect.objectContaining({ code: "malformed-envelope" }) as Error)
+  })
+
+  test("accepts Standard Schema paths of keys and segments", () => {
+    const issues = [{ message: "bad", path: ["items", 0, { key: "name" }] }, { message: "no path" }]
+
+    expect(() =>
+      fromWire({
+        error: { detail: { code: "validation", issues }, message: "bad", name: "ChannelError" },
+        ok: false,
+      })
+    ).toThrow(expect.objectContaining({ code: "validation", issues }) as Error)
+  })
+
+  test("copies only a detail's known fields onto the rehydrated error", () => {
+    const error = (() => {
+      try {
+        fromWire({
+          error: {
+            detail: { code: "unknown-channel", message: "spoofed", path: "a.b", stack: "spoofed" },
+            message: "x",
+            name: "ChannelError",
+          },
+          ok: false,
+        })
+        return null
+      } catch (error) {
+        return error as ChannelError
+      }
+    })()
+
+    expect(error?.code).toBe("unknown-channel")
+    expect(error?.message).toBe('Unknown channel: "a.b"')
+    expect(error?.stack).not.toBe("spoofed")
   })
 
   test("captures operations that are not dispatch, including sync throws", async () => {

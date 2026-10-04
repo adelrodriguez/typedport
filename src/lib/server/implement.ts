@@ -1,23 +1,7 @@
-import type { StandardSchemaV1 } from "@standard-schema/spec"
-import { type Channel, type ContractTree, isChannel } from "./contract"
-
-type MaybePromise<T> = Promise<T> | T
-type Join<Prefix extends string, Key extends string> = Prefix extends "" ? Key : `${Prefix}.${Key}`
-
-/**
- * The resolver signature one leaf demands: parsed input (the schema's output type, after defaults
- * and coercions) and the per-dispatch context. A round-trip leaf must return something its `output`
- * schema accepts; a one-way leaf's resolver may return anything — the router discards it.
- */
-type ResolverFor<Leaf, Context> =
-  Leaf extends Channel<infer Input, infer Output>
-    ? Output extends StandardSchemaV1
-      ? (
-          input: StandardSchemaV1.InferOutput<Input>,
-          context: Context
-        ) => MaybePromise<StandardSchemaV1.InferInput<Output>>
-      : (input: StandardSchemaV1.InferOutput<Input>, context: Context) => unknown
-    : never
+import type { Join } from "../core/types"
+import type { Resolver } from "./types"
+import { type Channel, type ContractTree, isChannel, joinPath } from "../core/contract"
+import { SetupError } from "../core/setup-error"
 
 /**
  * One implemented leaf: the dotted path it serves, the resolver, and (as a phantom on the resolver)
@@ -45,7 +29,7 @@ type AnyFragment = Fragment
  */
 export type Implementer<Tree, Context = void, Prefix extends string = ""> = {
   [Key in keyof Tree & string]: Tree[Key] extends Channel
-    ? (resolver: ResolverFor<Tree[Key], Context>) => Fragment<Join<Prefix, Key>, Context>
+    ? (resolver: Resolver<Tree[Key], Context>) => Fragment<Join<Prefix, Key>, Context>
     : Implementer<Tree[Key], Context, Join<Prefix, Key>>
 } & {
   /**
@@ -74,7 +58,7 @@ function build(tree: ContractTree, prefix: string): Record<string, unknown> {
   }
 
   for (const [key, child] of Object.entries(tree)) {
-    const path = prefix ? `${prefix}.${key}` : key
+    const path = joinPath(prefix, key)
 
     node[key] = isChannel(child)
       ? (resolver: Fragment["$resolver"]): Fragment => ({
@@ -134,7 +118,7 @@ export function flattenFragments(
   contract: ContractTree,
   handlers: Record<string, unknown>
 ): Record<string, Fragment["$resolver"]> {
-  const map: Record<string, Fragment["$resolver"]> = {}
+  const map: Record<string, Fragment["$resolver"]> = Object.create(null)
 
   walk(contract, handlers, "")
 
@@ -142,20 +126,20 @@ export function flattenFragments(
 
   function walk(tree: ContractTree, node: Record<string, unknown>, prefix: string): void {
     for (const [key, child] of Object.entries(tree)) {
-      const path = prefix ? `${prefix}.${key}` : key
-      const value = node[key]
+      const path = joinPath(prefix, key)
+      const value = Object.hasOwn(node, key) ? node[key] : undefined
 
       if (value === undefined) {
-        throw new Error(`Missing handler for "${path}"`)
+        throw new SetupError({ code: "missing-resolver", path })
       }
 
       if (isChannel(child)) {
         if (!isFragment(value)) {
-          throw new Error(`Handler for "${path}" is not a fragment`)
+          throw new SetupError({ code: "invalid-handler", expected: "fragment", path })
         }
 
         if (value.$path !== path) {
-          throw new Error(`Handler for "${value.$path}" placed at "${path}"`)
+          throw new SetupError({ code: "misplaced-handler", fragmentPath: value.$path, path })
         }
 
         map[path] = value.$resolver
@@ -163,7 +147,7 @@ export function flattenFragments(
       }
 
       if (typeof value !== "object" || value === null) {
-        throw new Error(`Expected a branch of handlers at "${path}"`)
+        throw new SetupError({ code: "invalid-handler", expected: "branch", path })
       }
 
       walk(child, value as Record<string, unknown>, path)

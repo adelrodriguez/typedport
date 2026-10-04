@@ -1,21 +1,24 @@
-export { createClient } from "./lib/client"
+export { createClient } from "./lib/client/client"
+export type { InferClient } from "./lib/client/types"
 export {
   channel,
   type ContractTree,
   defineContract,
+  flatten,
   isChannel,
   type Channel,
   type OneWayContract,
-} from "./lib/contract"
-export { ChannelError, type ChannelErrorDetail } from "./lib/error"
+} from "./lib/core/contract"
+export { ChannelError, type ChannelErrorDetail } from "./lib/core/error"
+export { SetupError, type SetupErrorDetail } from "./lib/core/setup-error"
+export { parseWith } from "./lib/core/schema"
+export type { Transport } from "./lib/core/transport"
 export {
   implement,
   isFragment,
   type Fragment,
   type FragmentTree,
   type Implementer,
-} from "./lib/implement"
-export { createRouter, type Router } from "./lib/router"
-export { parseWith } from "./lib/standard"
-export type { InferClient, InferResolvers, Transport } from "./lib/types"
-export { flatten } from "./lib/utils"
+} from "./lib/server/implement"
+export { createRouter, type Router } from "./lib/server/router"
+export type { InferResolvers } from "./lib/server/types"

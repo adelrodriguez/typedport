@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest"
 import * as z from "zod"
-import { defineContract, channel } from "../contract"
-import { ChannelError } from "../error"
+import { defineContract, channel } from "../../core/contract"
+import { ChannelError } from "../../core/error"
 import { createRouter } from "../router"
 
 const contract = defineContract({
@@ -56,6 +56,32 @@ describe("createRouter", () => {
     await expect(router.dispatch("math.subtract", {})).rejects.toThrow(
       'Unknown channel: "math.subtract"'
     )
+  })
+
+  test("rejects Object.prototype member names as unknown channels", async () => {
+    const router = createRouter(contract, {
+      "math.add": ({ a, b }) => a + b,
+      notify: () => null,
+    })
+
+    const errors = await Promise.all(
+      ["constructor", "__proto__", "toString", "hasOwnProperty"].map((path) =>
+        router.dispatch(path, {}).catch((error: unknown) => error)
+      )
+    )
+
+    for (const error of errors) {
+      expect(error).toBeInstanceOf(ChannelError)
+      expect((error as ChannelError).code).toBe("unknown-channel")
+    }
+  })
+
+  test("throws at construction when a flat map misses a leaf", () => {
+    expect(() =>
+      createRouter(contract, {
+        "math.add": ({ a, b }: { a: number; b: number }) => a + b,
+      } as never)
+    ).toThrow('Missing resolver for "notify"')
   })
 
   test("rejects resolver results that drift off contract as output-validation", async () => {

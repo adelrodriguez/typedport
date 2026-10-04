@@ -1,10 +1,11 @@
 import { describe, expect, test } from "vitest"
+import WebSocket from "ws"
 import * as z from "zod"
-import { createClient } from "../client"
-import { defineContract, channel } from "../contract"
-import { createRouter } from "../router"
+import { createClient } from "../../client/client"
+import { defineContract, channel } from "../../core/contract"
+import { createRouter } from "../../server/router"
+import { connect } from "../../wire/connect"
 import { webSocket, whenOpen, type WebSocketLike } from "../web-socket"
-import { connect } from "../wire"
 
 type MessageListener = (event: { data: unknown }) => void
 
@@ -176,7 +177,12 @@ describe("whenOpen", () => {
 
     socket.fail()
 
-    await expect(pending).rejects.toThrow("Socket failed before opening")
+    await expect(pending).rejects.toThrow(
+      expect.objectContaining({
+        cause: new Error("Socket errored before opening"),
+        code: "closed",
+      }) as Error
+    )
   })
 
   test("rejects when the socket closes before opening", async () => {
@@ -186,7 +192,35 @@ describe("whenOpen", () => {
 
     socket.hangUp()
 
-    await expect(pending).rejects.toThrow("Socket closed before opening")
+    await expect(pending).rejects.toThrow(
+      expect.objectContaining({
+        cause: new Error("Socket closed before opening"),
+        code: "closed",
+      }) as Error
+    )
+  })
+
+  test("rejects a socket that is already closed instead of waiting forever", async () => {
+    const socket: WebSocketLike = {
+      addEventListener: () => null,
+      readyState: 3,
+      removeEventListener: () => null,
+      send: () => null,
+    }
+
+    await expect(whenOpen(socket)).rejects.toThrow(
+      expect.objectContaining({ code: "closed", name: "ChannelError" }) as Error
+    )
+  })
+
+  test("survives a real ws socket closed mid-handshake", async () => {
+    // `close()` before the handshake leaves the socket CLOSING and makes `ws` emit `error` on
+    // the next tick. Without a listener for it, Node throws and the process dies.
+    const socket = new WebSocket("ws://127.0.0.1:1")
+    socket.close()
+
+    expect(socket.readyState).toBe(WebSocket.CLOSING)
+    await expect(whenOpen(socket)).rejects.toMatchObject({ code: "closed" })
   })
 
   test("detaches its listeners once settled", async () => {

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest"
 import * as z from "zod"
+import { defineContract, channel } from "../../core/contract"
+import { createRouter } from "../../server/router"
 import { createClient } from "../client"
-import { defineContract, channel } from "../contract"
-import { createRouter } from "../router"
 
 const LocalTextFile = z.object({ contents: z.string(), path: z.string() })
 
@@ -90,6 +90,20 @@ describe("createClient", () => {
     const tree = client as unknown as { localFiles: { rename: () => Promise<void> } }
 
     await expect(tree.localFiles.rename()).rejects.toThrow('Unknown channel: "localFiles.rename"')
+  })
+
+  test("returns the same node for the same path", () => {
+    const { client } = createTestClient()
+
+    expect(client.localFiles).toBe(client.localFiles)
+    expect(client.localFiles.open).toBe(client.localFiles.open)
+  })
+
+  test("does not resolve Object.prototype members as channels", () => {
+    const { client } = createTestClient()
+    const tree = client as unknown as { constructor: { $input: unknown } }
+
+    expect(() => tree.constructor.$input).toThrow('Unknown channel: "constructor"')
   })
 
   test("returns the transport's value as-is — output is not validated client-side", async () => {
