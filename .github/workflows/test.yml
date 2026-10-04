@@ -92,14 +92,16 @@ jobs:
           pnpm tsx examples/websocket/client.ts
           kill %1
 
+      # The dev server opens its port before it seeds the default user, and
+      # rejects the dev token with a 400 until then — so wait for an
+      # authenticated request to succeed, not just for the port.
       - name: Run QStash example
         run: |
           npx -y @upstash/qstash-cli dev &
           pnpm tsx examples/qstash/server.ts > server.log 2>&1 &
-          sleep 5
+          timeout 60 sh -c 'until curl -sf -H "Authorization: Bearer eyJVc2VySUQiOiJkZWZhdWx0VXNlciIsIlBhc3N3b3JkIjoiZGVmYXVsdFBhc3N3b3JkIn0=" http://127.0.0.1:8080/v2/queues > /dev/null; do sleep 0.5; done'
+          timeout 30 sh -c 'until grep -q "listening on" server.log; do sleep 0.5; done'
           pnpm tsx examples/qstash/client.ts
-          sleep 10
+          timeout 30 sh -c 'until grep -q "welcome email sent" server.log && grep -q "report rep_123 ready" server.log; do sleep 0.5; done' || { cat server.log; exit 1; }
           cat server.log
-          grep -q "welcome email sent" server.log
-          grep -q "report rep_123 ready" server.log
           kill %1 %2
