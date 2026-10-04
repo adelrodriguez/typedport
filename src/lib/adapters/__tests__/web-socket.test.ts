@@ -83,6 +83,7 @@ const contract = defineContract({
   math: {
     add: channel({ input: z.object({ a: z.number(), b: z.number() }), output: z.number() }),
   },
+  ping: channel({ input: z.void(), output: z.literal("pong") }),
 })
 
 describe("webSocket", () => {
@@ -91,6 +92,7 @@ describe("webSocket", () => {
 
     const router = createRouter(contract, {
       "math.add": ({ a, b }) => a + b,
+      ping: () => "pong" as const,
     })
     connect(webSocket(serverSocket), { router })
 
@@ -98,6 +100,24 @@ describe("webSocket", () => {
     const api = createClient(contract, client.transport)
 
     await expect(api.math.add({ a: 2, b: 3 })).resolves.toBe(5)
+  })
+
+  test("no-input calls survive JSON dropping the undefined payload", async () => {
+    const [serverSocket, clientSocket] = createSocketPair()
+
+    connect(webSocket(serverSocket), {
+      router: createRouter(contract, {
+        "math.add": ({ a, b }) => a + b,
+        ping: () => "pong" as const,
+      }),
+    })
+
+    const api = createClient(
+      contract,
+      connect(webSocket(clientSocket), { timeoutMs: 1000 }).transport
+    )
+
+    await expect(api.ping()).resolves.toBe("pong")
   })
 
   test("parses Buffer-style frames, as ws delivers them", () => {

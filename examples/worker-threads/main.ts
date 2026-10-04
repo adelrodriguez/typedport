@@ -18,7 +18,7 @@ console.log("primes below 1,000,000:", await api.primes.count({ below: 1_000_000
 
 // Validation happens before anything reaches the worker:
 await api.primes.count({ below: -1 }).catch((error: unknown) => {
-  console.log("rejected at the call site:", (error as Error).message)
+  console.log("rejected at the call site:", error instanceof Error ? error.message : error)
 })
 
 close()

@@ -1,4 +1,5 @@
 import type { Wire } from "../wire/types"
+import { isRecord } from "../core/guards"
 import { SetupError } from "../core/setup-error"
 
 /**
@@ -126,14 +127,22 @@ export type MessageWindowLike = {
 }
 
 function defaultWindow(caller: string): MessageWindowLike {
-  // The cast is the boundary with the untyped global scope; the guard below is what validates it.
-  const candidate = (globalThis as { window?: MessageWindowLike }).window
+  const candidate: unknown = Reflect.get(globalThis, "window")
 
-  if (!candidate) {
+  if (!isMessageWindow(candidate)) {
     throw new SetupError({ caller, code: "no-window" })
   }
 
   return candidate
+}
+
+function isMessageWindow(value: unknown): value is MessageWindowLike {
+  return (
+    isRecord(value)
+    && typeof value.addEventListener === "function"
+    && typeof value.removeEventListener === "function"
+    && typeof value.postMessage === "function"
+  )
 }
 
 /**
@@ -150,10 +159,10 @@ export function receivePort(type: string, target?: MessageWindowLike): Promise<D
 
   return new Promise((resolve) => {
     const handle = (event: PortMessageEvent): void => {
-      const data = event.data as { type?: unknown } | null
+      const { data } = event
       const port = event.ports[0]
 
-      if (event.source !== win || data?.type !== type || !port) {
+      if (event.source !== win || !isRecord(data) || data.type !== type || !port) {
         return
       }
 
