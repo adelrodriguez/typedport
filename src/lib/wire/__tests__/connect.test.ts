@@ -342,6 +342,22 @@ describe("toWire / fromWire", () => {
     ).toThrow(expect.objectContaining({ code: "malformed-envelope" }) as Error)
   })
 
+  test("rejects a huge sparse path at once, without allocating its length", () => {
+    // Compact under structured clone, but `Array.from` would try to build 2³² − 1 slots.
+    const path = structuredClone(holes(2 ** 32 - 1))
+
+    expect(() =>
+      fromWire({
+        error: {
+          detail: { code: "validation", issues: [{ message: "bad", path }] },
+          message: "bad",
+          name: "ChannelError",
+        },
+        ok: false,
+      })
+    ).toThrow(expect.objectContaining({ code: "malformed-envelope" }) as Error)
+  })
+
   test("accepts Standard Schema paths of keys and segments", () => {
     const issues = [{ message: "bad", path: ["items", 0, { key: "name" }] }, { message: "no path" }]
 

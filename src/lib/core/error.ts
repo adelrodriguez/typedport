@@ -151,9 +151,17 @@ function isIssue(value: unknown): boolean {
 }
 
 // `Array.prototype.every` skips empty slots, and structured clone (MessagePort, workers) preserves
-// them, so `new Array(1)` would pass. `Array.from` turns each hole into `undefined`, which fails.
+// them, so `new Array(1)` would pass. Walk the indices instead, failing on the first hole — without
+// copying: a compact sparse array can claim a huge `length`, and `Array.from` would allocate it all.
+// A dense array is only as long as what the peer actually sent.
 function everySlot(array: readonly unknown[], predicate: (value: unknown) => boolean): boolean {
-  return Array.from(array).every((value) => predicate(value))
+  for (let index = 0; index < array.length; index += 1) {
+    if (!(index in array) || !predicate(array[index])) {
+      return false
+    }
+  }
+
+  return true
 }
 
 function isPathSegment(value: unknown): boolean {
