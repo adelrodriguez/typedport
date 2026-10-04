@@ -66,6 +66,39 @@ function createConnectedPeers() {
   }
 }
 
+// A serving end whose resolver records its signal and only settles on abort.
+function createServingPeer(options: { onHidden?: (error: unknown) => void } = {}) {
+  const [serverWire, clientWire] = createWirePair()
+  const signals: AbortSignal[] = []
+  const sent: unknown[] = []
+  let started: (() => void) | undefined
+  const running = new Promise<void>((resolve) => {
+    started = resolve
+  })
+  const router = createRouter(pullContract, {
+    "math.add": (_input, { signal }) =>
+      new Promise<number>((_resolve, reject) => {
+        signals.push(signal)
+        started?.()
+        signal.addEventListener("abort", () => {
+          reject(new Error("stopped"))
+        })
+      }),
+  })
+  const tappedServerWire: Wire = {
+    onMessage: serverWire.onMessage,
+    send: (data) => {
+      sent.push(data)
+      serverWire.send(data)
+    },
+  }
+
+  const server = connect(tappedServerWire, { onHidden: options.onHidden, router })
+  const client = connect(clientWire, { timeoutMs: 1000 })
+
+  return { client, running, sent, server, signals }
+}
+
 describe("connect", () => {
   test("round-trips in both directions over one pipe", async () => {
     const { api, push } = createConnectedPeers()
@@ -216,6 +249,65 @@ describe("connect", () => {
     await expect(call).rejects.toBe("navigated away")
   })
 
+  describe("cancellation reaches the peer's resolver", () => {
+    test("an aborted call aborts the peer's signal, with no reply and nothing hidden", async () => {
+      const hidden: unknown[] = []
+      const { client, running, sent, signals } = createServingPeer({
+        onHidden: (error) => hidden.push(error),
+      })
+      const controller = new AbortController()
+
+      const call = Promise.resolve(
+        client.transport("math.add", { a: 1, b: 2 }, { signal: controller.signal })
+      )
+      await running
+      controller.abort("gave up")
+
+      await expect(call).rejects.toBe("gave up")
+      await vi.waitFor(() => {
+        expect(signals[0]?.aborted).toBe(true)
+      })
+      expect(sent).toEqual([])
+      expect(hidden).toEqual([])
+    })
+
+    test("a timed-out call aborts the peer's signal", async () => {
+      vi.useFakeTimers()
+
+      try {
+        const { client, running, signals } = createServingPeer()
+        const call = Promise.resolve(client.transport("math.add", { a: 1, b: 2 })).catch(
+          (error: unknown) => error
+        )
+
+        await running
+        await vi.advanceTimersByTimeAsync(1000)
+
+        await expect(call).resolves.toMatchObject({ code: "timeout" })
+        await vi.waitFor(() => {
+          expect(signals[0]?.aborted).toBe(true)
+        })
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    test("closing the serving end aborts its running resolvers", async () => {
+      const { client, running, server, signals } = createServingPeer()
+      const call = Promise.resolve(client.transport("math.add", { a: 1, b: 2 })).catch(
+        (error: unknown) => error
+      )
+
+      await running
+      server.close()
+
+      expect(signals[0]?.aborted).toBe(true)
+      expect(signals[0]?.reason).toMatchObject({ code: "closed" })
+      client.close()
+      await call
+    })
+  })
+
   test("an already-aborted call signal never sends", async () => {
     const [wire, peer] = createWirePair()
     const seen: unknown[] = []
@@ -304,7 +396,7 @@ describe("connect", () => {
     const seen: string[] = []
 
     const router = createRouter<typeof pullContract, { sessionId: string }>(pullContract, {
-      "math.add": ({ a, b }, session) => {
+      "math.add": ({ a, b }, { context: session }) => {
         seen.push(session.sessionId)
         return a + b
       },

@@ -8,6 +8,7 @@ import { type ExposeOptions, fromWire, toWire } from "./envelope"
 
 // `result` stays unknown until `fromWire` validates it: the peer is the source.
 type WireMessage =
+  | { kind: "cancel"; id: number }
   | { kind: "req"; id: number; path: string; payload: unknown }
   | { kind: "res"; id: number; result: unknown }
 
@@ -18,8 +19,8 @@ type PendingEntry = {
 
 type CallOptions = {
   /**
-   * Aborts this call: it rejects with `signal.reason` and a late reply is dropped. The peer's
-   * resolver is not told and runs to completion.
+   * Aborts this call: it rejects with `signal.reason`, a late reply is dropped, and the peer aborts
+   * the `signal` its resolver received.
    */
   signal?: AbortSignal
 }
@@ -38,7 +39,9 @@ type CallOptions = {
  *
  * `timeoutMs` bounds each outgoing call; without it a dead peer leaves calls pending forever. The
  * transport also takes `{ signal }` per call, so `api.$with({ signal })` cancels from the client;
- * the call rejects with `signal.reason`.
+ * the call rejects with `signal.reason`. A call that is aborted or times out tells the peer, which
+ * aborts the `signal` its resolver received; closing the session aborts every resolver this end is
+ * running.
  *
  * The session ends on `close(reason?)` or when `options.signal` aborts (its reason becomes the
  * close reason): everything in flight and every future call rejects with a `ChannelError` (code
@@ -74,18 +77,29 @@ export function connect<Context = void>(
           },
           // A queued request whose caller already gave up (timed out, aborted) must not reach
           // the peer once the wire arrives — the reply would be dropped, but the peer's resolver
-          // would still run. Anything that isn't a request still flows.
+          // would still run. A queued cancel always belongs to such a request, so it goes too.
           (data) => {
             const message = parseMessage(data)
-            return message?.kind !== "req" || pending.has(message.id)
+
+            if (message?.kind === "req") {
+              return pending.has(message.id)
+            }
+
+            return message?.kind !== "cancel"
           }
         )
   const { context, router, signal, timeoutMs, ...exposure } = options
   // oxlint-disable-next-line typescript/consistent-type-assertions -- `Router<Context>`'s rest tuple is a conditional TypeScript cannot resolve for a generic Context
   const dispatch = router?.dispatch as
-    | ((path: string, raw: unknown, context?: Context) => Promise<unknown>)
+    | ((
+        path: string,
+        raw: unknown,
+        options: { context?: Context; signal?: AbortSignal }
+      ) => Promise<unknown>)
     | undefined
   const pending = new Map<number, PendingEntry>()
+  // Requests this end is serving, by the peer's id, so a cancel can reach the resolver.
+  const serving = new Map<number, AbortController>()
   let nextId = 0
   let closed: ChannelError | undefined
   let resolveClosed: ((error: ChannelError) => void) | undefined
@@ -104,6 +118,11 @@ export function connect<Context = void>(
 
     if (message?.kind === "res") {
       pending.get(message.id)?.settle(message.result)
+      return
+    }
+
+    if (message?.kind === "cancel") {
+      serving.get(message.id)?.abort()
     }
   })
 
@@ -123,6 +142,10 @@ export function connect<Context = void>(
     // Each entry deletes only itself as it fails, which Map iteration tolerates.
     for (const entry of pending.values()) {
       entry.fail(closed)
+    }
+
+    for (const controller of serving.values()) {
+      controller.abort(closed)
     }
 
     resolveClosed?.(closed)
@@ -159,6 +182,7 @@ export function connect<Context = void>(
         }
         const onCallAbort = (): void => {
           cleanup()
+          cancelRemote(id)
           // oxlint-disable-next-line prefer-promise-reject-errors -- an abort rejects with the caller's own reason, as fetch does
           reject(callSignal?.reason)
         }
@@ -167,6 +191,7 @@ export function connect<Context = void>(
             ? undefined
             : setTimeout(() => {
                 cleanup()
+                cancelRemote(id)
                 reject(new ChannelError({ code: "timeout", path, timeoutMs }))
               }, timeoutMs)
 
@@ -195,16 +220,45 @@ export function connect<Context = void>(
       }),
   }
 
+  // Best effort: if the pipe is gone, so is the peer's reason to keep working.
+  function cancelRemote(id: number): void {
+    if (closed) {
+      return
+    }
+
+    try {
+      source.send({ id, kind: "cancel" })
+    } catch {
+      // Same as a lost reply: nothing to recover, and nobody awaits this.
+    }
+  }
+
   async function respond(message: { id: number; path: string; payload: unknown }): Promise<void> {
+    const controller = new AbortController()
+    serving.set(message.id, controller)
+
     const result = await toWire(
       dispatch
         ? // The thunk form lets toWire capture even a synchronously-throwing dispatch.
-          () => dispatch(message.path, message.payload, context)
+          () => dispatch(message.path, message.payload, { context, signal: controller.signal })
         : Promise.reject(new ChannelError({ code: "no-router" })),
-      exposure
+      {
+        expose: exposure.expose,
+        // A resolver that failed because the caller cancelled is not a failure worth logging.
+        onHidden: (error) => {
+          if (!controller.signal.aborted) {
+            exposure.onHidden?.(error)
+          }
+        },
+      }
     )
 
-    if (!closed) {
+    if (serving.get(message.id) === controller) {
+      serving.delete(message.id)
+    }
+
+    // A cancelled caller already stopped listening for this id.
+    if (!closed && !controller.signal.aborted) {
       try {
         source.send({ id: message.id, kind: "res", result })
       } catch {
@@ -233,6 +287,10 @@ function parseMessage(data: unknown): WireMessage | undefined {
 
   if (message.kind === "res") {
     return { id: message.id, kind: "res", result: message.result }
+  }
+
+  if (message.kind === "cancel") {
+    return { id: message.id, kind: "cancel" }
   }
 
   return undefined

@@ -37,7 +37,7 @@ describe("implement", () => {
 describe("createRouter with a handler tree", () => {
   const tp = implement(contract).$context<Session>()
 
-  const open = tp.notes.open(({ path }, session) => ({
+  const open = tp.notes.open(({ path }, { context: session }) => ({
     contents: `${session.userId}:${path}`,
     path,
   }))
@@ -48,7 +48,7 @@ describe("createRouter with a handler tree", () => {
     const router = createRouter(contract, { notes: { open, save }, ping })
 
     await expect(
-      router.dispatch("notes.open", { path: "/a.md" }, { userId: "u1" })
+      router.dispatch("notes.open", { path: "/a.md" }, { context: { userId: "u1" } })
     ).resolves.toEqual({ contents: "u1:/a.md", path: "/a.md" })
   })
 
@@ -64,7 +64,7 @@ describe("createRouter with a handler tree", () => {
     const router = createRouter(contract, { notes: branch, ping })
 
     await expect(
-      router.dispatch("notes.open", { path: "/a.md" }, { userId: "u1" })
+      router.dispatch("notes.open", { path: "/a.md" }, { context: { userId: "u1" } })
     ).resolves.toEqual({ contents: "u1:/a.md", path: "/a.md" })
   })
 
@@ -97,7 +97,7 @@ function typeAssertions(): void {
   const router = createRouter(contract, { notes, ping })
 
   // Context was inferred from the fragments: dispatch demands it.
-  void router.dispatch("notes.open", { path: "x" }, { userId: "u" })
+  void router.dispatch("notes.open", { path: "x" }, { context: { userId: "u" } })
   // @ts-expect-error context is required
   void router.dispatch("notes.open", { path: "x" })
 

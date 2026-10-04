@@ -67,7 +67,21 @@ const router = createRouter(contract, {
 await router.dispatch("localFiles.save", rawInput)
 ```
 
-Resolvers also receive a **context**: whatever the edge knows about the caller (the authenticated user, `event.senderFrame`, the socket session). The edge supplies it per dispatch. With the default `Context = void` the argument disappears entirely, and `dispatch` stays a valid two-argument `Transport`.
+Resolvers take a second argument, `{ context, signal }`:
+
+- **`context`** is whatever the edge knows about the caller (the authenticated user, `event.senderFrame`, the socket session). The edge passes it per call: `router.dispatch(path, raw, { context: session })`.
+- **`signal`** aborts when the caller gives up. Pass it on to `fetch`, a database driver, or a model call. It's always present, and it never aborts if the edge didn't pass one. `dispatch` also rejects with the abort reason straight away, even if the resolver ignores its signal.
+
+```typescript
+const router = createRouter<typeof contract, Session>(contract, {
+  "reports.generate": async ({ id }, { context, signal }) =>
+    generate(id, { owner: context.userId, signal }),
+})
+
+await router.dispatch("reports.generate", raw, { context: session, signal })
+```
+
+With the default `Context = void`, the options argument is optional and `dispatch` is a valid `Transport`: `createClient(contract, router.dispatch)` wires the whole stack in memory, with `$with({ signal })` to cancel.
 
 Call it with a client. A transport is one function, and every leaf is directly callable:
 
@@ -110,7 +124,7 @@ export const tp = implement(contract).$context<Session>()
 // local-files/handlers.ts — zero annotations, everything inferred from the contract
 import { tp } from "../contract"
 
-export const open = tp.localFiles.open(async (_input, session) => openFile(session.userId))
+export const open = tp.localFiles.open(async (_input, { context }) => openFile(context.userId))
 export const save = tp.localFiles.save(async ({ path, contents }) => saveFile(path, contents))
 ```
 
@@ -234,7 +248,7 @@ await api.$with({ signal: AbortSignal.timeout(1000) }).notes.list() // cancel on
 
 `connect` is symmetric. Call it on both ends of a duplex pipe, each with its own router, and each side gets a transport for calling the other. It speaks the envelope internally, so error fidelity comes for free. It hides failures the same way `toWire` does and takes the same `expose` and `onHidden` options. A trusted peer (a worker, your own processes) can see everything with `expose: () => true`.
 
-A call's `{ signal }` rejects that call with `signal.reason` and drops its late reply. The other side's resolver isn't told and runs to completion. `close(reason?)`, or aborting the `signal` passed to `connect`, rejects everything in flight and every future call, and `closed` resolves with that `ChannelError` once it happens. Tie the session to whatever liveness signal the pipe has (a window's `closed`, a socket's `close`).
+A call's `{ signal }` rejects that call with `signal.reason` and drops its late reply. A call that's aborted or times out also tells the other side, which aborts the `signal` its resolver received. Closing a session aborts every resolver that end is running. `close(reason?)`, or aborting the `signal` passed to `connect`, rejects everything in flight and every future call, and `closed` resolves with that `ChannelError` once it happens. Tie the session to whatever liveness signal the pipe has (a window's `closed`, a socket's `close`).
 
 `connect` also accepts a `Promise<Wire>`, for pipes that aren't ready yet: a port still being handed over, a socket still opening. Calls made in the meantime queue (bounded by `timeoutMs`) and flush when the wire arrives. `close` before arrival wins the race, and a rejected wire promise closes the connection with the rejection as `cause`.
 
