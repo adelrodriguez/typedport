@@ -1,5 +1,5 @@
 <p align="center">
-  <h1 align="center"><code>typedport</code></h1>
+  <h1 align="center">🚌 <code>typedport</code></h1>
   <p align="center">
     <strong>Type-safe RPC over any transport</strong>
   </p>
