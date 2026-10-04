@@ -391,6 +391,45 @@ describe("connect", () => {
     expect(channelError.timeoutMs).toBe(20)
   })
 
+  test("times out after 30 seconds when timeoutMs is unset", async () => {
+    vi.useFakeTimers()
+
+    try {
+      const [wire] = createWirePair()
+      const { transport } = connect(wire)
+      const call = Promise.resolve(transport("math.add", { a: 1, b: 2 })).catch(
+        (error: unknown) => error
+      )
+
+      await vi.advanceTimersByTimeAsync(29_999)
+      expect(vi.getTimerCount()).toBe(1)
+      await vi.advanceTimersByTimeAsync(1)
+
+      await expect(call).resolves.toMatchObject({ code: "timeout", timeoutMs: 30_000 })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test("timeoutMs: Infinity leaves calls pending until close", async () => {
+    vi.useFakeTimers()
+
+    try {
+      const [wire] = createWirePair()
+      const { close, transport } = connect(wire, { timeoutMs: Infinity })
+      const call = Promise.resolve(transport("math.add", { a: 1, b: 2 })).catch(
+        (error: unknown) => error
+      )
+
+      expect(vi.getTimerCount()).toBe(0)
+      close("done")
+
+      await expect(call).resolves.toMatchObject({ code: "closed" })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   test("passes per-connection context to the served router", async () => {
     const [serverWire, clientWire] = createWirePair()
     const seen: string[] = []

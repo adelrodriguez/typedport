@@ -217,14 +217,14 @@ type WireResult =
 
 Turns a `Wire` into a transport for calling the peer, and serves the peer's calls with `router`.
 
-| Option      | Type                          | Description                                                                                                           |
-| ----------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `router`    | `Router<Context>`             | Serves calls from the peer. Without it, the peer's calls fail with `no-router`                                        |
-| `context`   | `Context`                     | Passed to every dispatch this end serves                                                                              |
-| `timeoutMs` | `number`                      | Fails a call with `timeout` after this many milliseconds. No default. Without it, a call to a dead peer never settles |
-| `signal`    | `AbortSignal`                 | Closes the session when it aborts, with the signal's reason                                                           |
-| `expose`    | `(error: unknown) => boolean` | Decides which failures this end sends to the peer as-is                                                               |
-| `onHidden`  | `(error: unknown) => void`    | Receives the failures this end hides from the peer                                                                    |
+| Option      | Type                          | Description                                                                                                                                                |
+| ----------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `router`    | `Router<Context>`             | Serves calls from the peer. Without it, the peer's calls fail with `no-router`                                                                             |
+| `context`   | `Context`                     | Passed to every dispatch this end serves                                                                                                                   |
+| `timeoutMs` | `number`                      | Fails a call with `timeout` after this many milliseconds. Defaults to 30 seconds. `Infinity` disables it, so a call to a dead peer settles only on `close` |
+| `signal`    | `AbortSignal`                 | Closes the session when it aborts, with the signal's reason                                                                                                |
+| `expose`    | `(error: unknown) => boolean` | Decides which failures this end sends to the peer as-is                                                                                                    |
+| `onHidden`  | `(error: unknown) => void`    | Receives the failures this end hides from the peer                                                                                                         |
 
 `connect` returns an object with these properties:
 
