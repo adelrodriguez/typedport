@@ -10,7 +10,7 @@ import type { Wire } from "./types"
  */
 export function deferWire(
   pending: Promise<Wire>,
-  onReject: (reason: Error) => void,
+  onReject: (reason: unknown) => void,
   stillWanted: (data: unknown) => boolean
 ): Wire {
   let inner: Wire | undefined
@@ -40,7 +40,7 @@ export function deferWire(
   }
 
   adopt().catch((error: unknown) => {
-    onReject(error instanceof Error ? error : new Error(String(error)))
+    onReject(error)
   })
 
   return {

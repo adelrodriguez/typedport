@@ -8,6 +8,7 @@ import { isRecord } from "./guards"
  */
 export type ChannelErrorDetail =
   | { code: "closed" }
+  | { code: "internal" }
   | { code: "malformed-envelope" }
   | { code: "no-router" }
   | { code: "output-validation"; issues: readonly StandardSchemaV1.Issue[] }
@@ -19,6 +20,8 @@ function messageFor(detail: ChannelErrorDetail): string {
   switch (detail.code) {
     case "closed":
       return "Wire closed"
+    case "internal":
+      return "Internal error"
     case "malformed-envelope":
       return "Received a value that is not a WireResult envelope"
     case "no-router":
@@ -54,6 +57,8 @@ class ChannelBaseError extends Error {
  * - `unknown-channel` (`path`) — the path is not in the contract
  * - `timeout` (`path`, `timeoutMs`) — a `connect` call the peer never answered
  * - `closed` — the wire was torn down; the close reason is in `cause`
+ * - `internal` — the other side failed and hid why (`toWire` and `connect` hide failures by default);
+ *   the real error went to its `onHidden`
  * - `no-router` — the peer's `connect` has no router to serve requests
  * - `malformed-envelope` — `fromWire` received a value that is not a `WireResult` (a gateway error
  *   page, a proxy 502)
@@ -80,6 +85,8 @@ export function detailOf(detail: ChannelErrorDetail): ChannelErrorDetail {
   switch (detail.code) {
     case "closed":
       return { code: "closed" }
+    case "internal":
+      return { code: "internal" }
     case "malformed-envelope":
       return { code: "malformed-envelope" }
     case "no-router":
@@ -108,6 +115,7 @@ export function parseDetail(value: unknown): ChannelErrorDetail | undefined {
 
   switch (code) {
     case "closed":
+    case "internal":
     case "malformed-envelope":
     case "no-router":
       return { code }

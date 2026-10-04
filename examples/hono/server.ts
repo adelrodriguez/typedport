@@ -41,7 +41,7 @@ const app = new Hono()
 // Every response this route family produces — success or failure, any door —
 // is a WireResult envelope, so the client's unconditional fromWire always has
 // something it can read.
-const fail = (c: Context, message: string, status: 400 | 404 | 405 | 500) =>
+const fail = (c: Context, message: string, status: 400 | 404 | 405) =>
   c.json({ error: { message, name: "Error" }, ok: false } satisfies WireResult, status)
 
 // JSON has no undefined, so the client sends null for void inputs; map it
@@ -54,22 +54,20 @@ const respond = async (c: Context, path: string, input: unknown) => {
     return fail(c, "Unknown channel", 404)
   }
 
-  const wire = await toWire(router.dispatch(path, input ?? undefined))
+  // toWire hides everything but caller-fault errors by default: an application
+  // error or a resolver result that drifted off contract (`output-validation`)
+  // crosses as a ChannelError with code "internal", and the real one goes to onHidden.
+  const wire = await toWire(router.dispatch(path, input ?? undefined), {
+    onHidden: (error) => {
+      console.error(`resolver failed for "${path}":`, error)
+    },
+  })
 
   if (wire.ok) {
     return c.json(wire, 200)
   }
 
-  // Only `validation` is the caller's fault, so only its issues go back out.
-  // Everything else — an application error, a resolver result that drifted off
-  // contract (`output-validation`) — is the server's problem: log the detail,
-  // redact the response.
-  if (wire.error.detail?.code === "validation") {
-    return c.json(wire, 400)
-  }
-
-  console.error(`resolver failed for "${path}":`, wire.error)
-  return fail(c, "Internal server error", 500)
+  return c.json(wire, wire.error.detail?.code === "validation" ? 400 : 500)
 }
 
 // Dotted paths have no slashes, so each one is a single URL segment.

@@ -4,7 +4,7 @@ import type { Wire } from "./types"
 import { ChannelError } from "../core/error"
 import { isRecord } from "../core/guards"
 import { deferWire, subscribe } from "./deferred"
-import { fromWire, serializeError, toWire, type WireResult } from "./envelope"
+import { type ExposeOptions, fromWire, toWire } from "./envelope"
 
 // `result` stays unknown until `fromWire` validates it: the peer is the source.
 type WireMessage =
@@ -12,9 +12,16 @@ type WireMessage =
   | { kind: "res"; id: number; result: unknown }
 
 type PendingEntry = {
-  fail: (error: Error) => void
+  fail: (error: ChannelError) => void
   settle: (result: unknown) => void
-  timer: ReturnType<typeof setTimeout> | undefined
+}
+
+type CallOptions = {
+  /**
+   * Aborts this call: it rejects with `signal.reason` and a late reply is dropped. The peer's
+   * resolver is not told and runs to completion.
+   */
+  signal?: AbortSignal
 }
 
 /**
@@ -25,16 +32,19 @@ type PendingEntry = {
  * A pipe is one peer, so `context` is per-connection: whatever identity the edge established (the
  * session, the window) is passed to every dispatch this end serves.
  *
- * Full error fidelity is the point of the protocol: the peer receives every `ChannelError` detail,
- * including server-fault codes like `output-validation`. That makes `connect` a trusted-peer
- * transport (a worker, a MessagePort, your own processes). A peer that should not see server-side
- * detail — a browser talking to a public server — belongs behind an edge that redacts, like the
- * HTTP recipes do.
+ * Failures this end serves are hidden from the peer exactly as `toWire` hides them: caller-fault
+ * codes cross intact, everything else crosses as code `internal` and goes to `onHidden`. A trusted
+ * peer (a worker, your own processes) can see everything with `expose: () => true`.
  *
- * `timeoutMs` bounds each outgoing call; without it a dead peer leaves calls pending forever.
- * `close(reason?)` rejects everything in flight and every future call with a `ChannelError` (code
- * `closed`, the reason in `cause`) and stops serving — wire it to whatever liveness signal the pipe
- * has (a window's `closed`, a socket's `close`).
+ * `timeoutMs` bounds each outgoing call; without it a dead peer leaves calls pending forever. The
+ * transport also takes `{ signal }` per call, so `api.$with({ signal })` cancels from the client;
+ * the call rejects with `signal.reason`.
+ *
+ * The session ends on `close(reason?)` or when `options.signal` aborts (its reason becomes the
+ * close reason): everything in flight and every future call rejects with a `ChannelError` (code
+ * `closed`, the reason in `cause`) and this end stops serving. Tie it to whatever liveness signal
+ * the pipe has (a window's `closed`, a socket's `close`). `closed` resolves with that error once it
+ * happens.
  *
  * The wire may be a promise — a port that hasn't been handed over yet, a socket that hasn't opened.
  * Calls made in the meantime queue (bounded by `timeoutMs`) and flush when it resolves; `close`
@@ -43,8 +53,17 @@ type PendingEntry = {
  */
 export function connect<Context = void>(
   wire: Wire | Promise<Wire>,
-  options: { context?: Context; router?: Router<Context>; timeoutMs?: number } = {}
-): { transport: Transport; close: (reason?: Error) => void } {
+  options: ExposeOptions & {
+    context?: Context
+    router?: Router<Context>
+    signal?: AbortSignal
+    timeoutMs?: number
+  } = {}
+): {
+  close: (reason?: unknown) => void
+  closed: Promise<ChannelError>
+  transport: Transport<CallOptions>
+} {
   const source: Wire =
     "send" in wire
       ? wire
@@ -53,23 +72,26 @@ export function connect<Context = void>(
           (reason) => {
             close(reason)
           },
-          // A queued request whose caller already timed out must not reach the
-          // peer once the wire arrives — the reply would be dropped, but the
-          // peer's resolver would still run. Anything that isn't a request
-          // (responses to calls the peer somehow made this early) still flows.
+          // A queued request whose caller already gave up (timed out, aborted) must not reach
+          // the peer once the wire arrives — the reply would be dropped, but the peer's resolver
+          // would still run. Anything that isn't a request still flows.
           (data) => {
             const message = parseMessage(data)
             return message?.kind !== "req" || pending.has(message.id)
           }
         )
-  const { context, router, timeoutMs } = options
+  const { context, router, signal, timeoutMs, ...exposure } = options
   // oxlint-disable-next-line typescript/consistent-type-assertions -- `Router<Context>`'s rest tuple is a conditional TypeScript cannot resolve for a generic Context
   const dispatch = router?.dispatch as
     | ((path: string, raw: unknown, context?: Context) => Promise<unknown>)
     | undefined
   const pending = new Map<number, PendingEntry>()
   let nextId = 0
-  let closed: Error | undefined
+  let closed: ChannelError | undefined
+  let resolveClosed: ((error: ChannelError) => void) | undefined
+  const whenClosed = new Promise<ChannelError>((resolve) => {
+    resolveClosed = resolve
+  })
 
   const unsubscribe = subscribe(source, (data) => {
     // Anything that doesn't parse is not ours on a shared wire; ignore it.
@@ -81,74 +103,85 @@ export function connect<Context = void>(
     }
 
     if (message?.kind === "res") {
-      const { id, result } = message
-      const entry = pending.get(id)
-
-      if (!entry) {
-        return
-      }
-
-      pending.delete(id)
-
-      if (entry.timer !== undefined) {
-        clearTimeout(entry.timer)
-      }
-
-      entry.settle(result)
+      pending.get(message.id)?.settle(message.result)
     }
   })
 
-  function close(reason?: Error): void {
+  const onAbort = (): void => {
+    close(signal?.reason)
+  }
+
+  function close(reason?: unknown): void {
     if (closed) {
       return
     }
 
     closed = new ChannelError({ code: "closed" }, { cause: reason })
-
     unsubscribe?.()
+    signal?.removeEventListener("abort", onAbort)
 
+    // Each entry deletes only itself as it fails, which Map iteration tolerates.
     for (const entry of pending.values()) {
       entry.fail(closed)
     }
 
-    pending.clear()
+    resolveClosed?.(closed)
+  }
+
+  if (signal?.aborted) {
+    onAbort()
+  } else {
+    signal?.addEventListener("abort", onAbort, { once: true })
   }
 
   return {
     close,
-    transport: (path, payload) =>
+    closed: whenClosed,
+    transport: (path, payload, callOptions) =>
       new Promise((resolve, reject) => {
+        const callSignal = callOptions?.signal
+
         if (closed) {
           reject(closed)
           return
         }
 
+        // Throwing in the executor rejects with the raw reason, as fetch does.
+        callSignal?.throwIfAborted()
+
         const id = nextId
         nextId += 1
+
+        const cleanup = (): void => {
+          pending.delete(id)
+          clearTimeout(timer)
+          callSignal?.removeEventListener("abort", onCallAbort)
+        }
+        const onCallAbort = (): void => {
+          cleanup()
+          // oxlint-disable-next-line prefer-promise-reject-errors -- an abort rejects with the caller's own reason, as fetch does
+          reject(callSignal?.reason)
+        }
         const timer =
           timeoutMs === undefined
             ? undefined
             : setTimeout(() => {
-                pending.delete(id)
+                cleanup()
                 reject(new ChannelError({ code: "timeout", path, timeoutMs }))
               }, timeoutMs)
 
+        callSignal?.addEventListener("abort", onCallAbort, { once: true })
         pending.set(id, {
-          fail: (error) => {
-            if (timer !== undefined) {
-              clearTimeout(timer)
-            }
-
+          fail: (error: ChannelError) => {
+            cleanup()
             reject(error)
           },
           settle: (result) => {
-            try {
-              resolve(fromWire(result))
-            } catch (error) {
-              reject(error instanceof Error ? error : new Error(String(error)))
-            }
+            cleanup()
+
+            // Adopting a promise carries fromWire's throw through as the rejection.
+            resolve(Promise.resolve(result).then(fromWire))
           },
-          timer,
         })
 
         try {
@@ -156,22 +189,20 @@ export function connect<Context = void>(
         } catch (error) {
           // A synchronously-throwing send (DataCloneError on a non-cloneable
           // payload) rejects the caller; don't leak the pending entry.
-          pending.delete(id)
-
-          if (timer !== undefined) {
-            clearTimeout(timer)
-          }
-
+          cleanup()
           throw error
         }
       }),
   }
 
   async function respond(message: { id: number; path: string; payload: unknown }): Promise<void> {
-    const result: WireResult = dispatch
-      ? // The thunk form lets toWire capture even a synchronously-throwing dispatch.
-        await toWire(() => dispatch(message.path, message.payload, context))
-      : { error: serializeError(new ChannelError({ code: "no-router" })), ok: false }
+    const result = await toWire(
+      dispatch
+        ? // The thunk form lets toWire capture even a synchronously-throwing dispatch.
+          () => dispatch(message.path, message.payload, context)
+        : Promise.reject(new ChannelError({ code: "no-router" })),
+      exposure
+    )
 
     if (!closed) {
       try {

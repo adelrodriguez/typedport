@@ -15,17 +15,77 @@ export type WireResult =
     }
 
 /**
+ * Which failures `toWire` and `connect` let through with their real message and detail.
+ * Caller-fault `ChannelError`s always pass — `validation` (with its `issues`), `unknown-channel`,
+ * and `no-router` tell the caller what to fix and reveal nothing about the server — so the
+ * predicate only decides the rest: application errors, and server-fault codes like
+ * `output-validation`, whose `issues` describe the server's own data. A hidden failure crosses as a
+ * `ChannelError` with code `internal`.
+ */
+export type ExposeOptions = {
+  /**
+   * Returns `true` for a failure the peer may see as-is: `(error) => error instanceof NotFound`.
+   */
+  expose?: (error: unknown) => boolean
+  /**
+   * Receives every failure that was hidden, for the server's own logs.
+   */
+  onHidden?: (error: unknown) => void
+}
+
+// Codes that reveal nothing about the server. `internal` is here so a relayed hidden failure
+// passes through instead of being reported to `onHidden` a second time.
+const ALWAYS_EXPOSED: ReadonlySet<ChannelErrorDetail["code"]> = new Set([
+  "internal",
+  "no-router",
+  "unknown-channel",
+  "validation",
+])
+
+/**
  * Captures any operation's outcome as a serializable `WireResult` — never throws. Pass the
  * operation's promise (`toWire(router.dispatch(path, payload))`), or a thunk when the operation can
  * throw synchronously. `fromWire` on the other side is its inverse: `fromWire(await toWire(x))`
  * returns what `x` resolved with, or rethrows what it threw.
+ *
+ * Failures are hidden by default: anything but a caller-fault `ChannelError` crosses as a
+ * `ChannelError` with code `internal`, because the far side of a serializing boundary is often a
+ * browser. Widen it with `expose`, and log what was hidden with `onHidden` — see
+ * {@link ExposeOptions}.
  */
-export async function toWire(operation: Promise<unknown> | (() => unknown)): Promise<WireResult> {
+export async function toWire(
+  operation: Promise<unknown> | (() => unknown),
+  options: ExposeOptions = {}
+): Promise<WireResult> {
   try {
     return { ok: true, result: await (typeof operation === "function" ? operation() : operation) }
   } catch (error) {
-    return { error: serializeError(error), ok: false }
+    if (isAlwaysExposed(error) || policyExposes(options.expose, error)) {
+      return { error: serializeError(error), ok: false }
+    }
+
+    try {
+      options.onHidden?.(error)
+    } catch {
+      // A failing logger must not cost the caller its reply.
+    }
+
+    return { error: serializeError(new ChannelError({ code: "internal" })), ok: false }
   }
+}
+
+// `toWire` promises never to throw, so a policy that throws counts as "no": the failure stays
+// hidden, which is the safe side.
+function policyExposes(expose: ExposeOptions["expose"], error: unknown): boolean {
+  try {
+    return expose?.(error) === true
+  } catch {
+    return false
+  }
+}
+
+function isAlwaysExposed(error: unknown): boolean {
+  return error instanceof ChannelError && ALWAYS_EXPOSED.has(error.code)
 }
 
 /**
@@ -88,7 +148,7 @@ function parseEnvelope(data: unknown): WireResult | undefined {
   return parsed ? { error: { detail: parsed, message, name }, ok: false } : undefined
 }
 
-export function serializeError(error: unknown): Exclude<WireResult, { ok: true }>["error"] {
+function serializeError(error: unknown): Exclude<WireResult, { ok: true }>["error"] {
   if (error instanceof ChannelError) {
     return { detail: detailOf(error), message: error.message, name: error.name }
   }
@@ -97,5 +157,15 @@ export function serializeError(error: unknown): Exclude<WireResult, { ok: true }
     return { message: error.message, name: error.name }
   }
 
-  return { message: String(error), name: "Error" }
+  return { message: describe(error), name: "Error" }
+}
+
+// `String()` throws for values with no usable conversion (`Object.create(null)`), and anything can
+// be thrown.
+function describe(value: unknown): string {
+  try {
+    return String(value)
+  } catch {
+    return "Unknown error"
+  }
 }
