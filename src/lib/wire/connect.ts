@@ -12,6 +12,8 @@ type WireMessage =
   | { kind: "req"; id: number; path: string; payload: unknown }
   | { kind: "res"; id: number; result: unknown }
 
+const DEFAULT_TIMEOUT_MS = 30_000
+
 type PendingEntry = {
   fail: (error: ChannelError) => void
   settle: (result: unknown) => void
@@ -37,11 +39,12 @@ type CallOptions = {
  * codes cross intact, everything else crosses as code `internal` and goes to `onHidden`. A trusted
  * peer (a worker, your own processes) can see everything with `expose: () => true`.
  *
- * `timeoutMs` bounds each outgoing call; without it a dead peer leaves calls pending forever. The
- * transport also takes `{ signal }` per call, so `api.$with({ signal })` cancels from the client;
- * the call rejects with `signal.reason`. A call that is aborted or times out tells the peer, which
- * aborts the `signal` its resolver received; closing the session aborts every resolver this end is
- * running.
+ * `timeoutMs` bounds each outgoing call (default 30 seconds) so a dead peer rejects calls instead
+ * of leaving them pending forever; pass `Infinity` to opt out when something else, such as `close`,
+ * covers liveness. The transport also takes `{ signal }` per call, so `api.$with({ signal })`
+ * cancels from the client; the call rejects with `signal.reason`. A call that is aborted or times
+ * out tells the peer, which aborts the `signal` its resolver received; closing the session aborts
+ * every resolver this end is running.
  *
  * The session ends on `close(reason?)` or when `options.signal` aborts (its reason becomes the
  * close reason): everything in flight and every future call rejects with a `ChannelError` (code
@@ -60,6 +63,9 @@ export function connect<Context = void>(
     context?: Context
     router?: Router<Context>
     signal?: AbortSignal
+    /**
+     * Bounds each outgoing call. Defaults to 30 seconds; `Infinity` disables it.
+     */
     timeoutMs?: number
   } = {}
 ): {
@@ -88,7 +94,7 @@ export function connect<Context = void>(
             return message?.kind !== "cancel"
           }
         )
-  const { context, router, signal, timeoutMs, ...exposure } = options
+  const { context, router, signal, timeoutMs = DEFAULT_TIMEOUT_MS, ...exposure } = options
   // oxlint-disable-next-line typescript/consistent-type-assertions -- `Router<Context>`'s rest tuple is a conditional TypeScript cannot resolve for a generic Context
   const dispatch = router?.dispatch as
     | ((
@@ -186,14 +192,14 @@ export function connect<Context = void>(
           // oxlint-disable-next-line prefer-promise-reject-errors -- an abort rejects with the caller's own reason, as fetch does
           reject(callSignal?.reason)
         }
-        const timer =
-          timeoutMs === undefined
-            ? undefined
-            : setTimeout(() => {
-                cleanup()
-                cancelRemote(id)
-                reject(new ChannelError({ code: "timeout", path, timeoutMs }))
-              }, timeoutMs)
+        // `setTimeout` would fire an `Infinity` delay immediately.
+        const timer = Number.isFinite(timeoutMs)
+          ? setTimeout(() => {
+              cleanup()
+              cancelRemote(id)
+              reject(new ChannelError({ code: "timeout", path, timeoutMs }))
+            }, timeoutMs)
+          : undefined
 
         callSignal?.addEventListener("abort", onCallAbort, { once: true })
         pending.set(id, {
