@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest"
+import { describe, expect, expectTypeOf, test } from "vitest"
 import * as z from "zod"
 import { defineContract, channel } from "../../core/contract"
 import { createRouter } from "../../server/router"
@@ -65,10 +65,9 @@ describe("createClient", () => {
   test("passes the transport's result through on one-way leaves", async () => {
     const client = createClient(contract, (path) => ({ messageId: `msg_${path}` }))
 
-    // Typed `Promise<void>`, but the raw value stays reachable for edges that want it.
-    // oxlint-disable-next-line no-confusing-void-expression -- deliberately observing the runtime value behind the void type
-    const result: unknown = await client.stripe.checkout.created({ id: "evt_123" })
+    const result = await client.stripe.checkout.created({ id: "evt_123" })
 
+    expectTypeOf(result).toBeUnknown()
     expect(result).toEqual({ messageId: "msg_stripe.checkout.created" })
   })
 

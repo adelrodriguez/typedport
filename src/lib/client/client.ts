@@ -67,9 +67,9 @@ export function createClient<Tree extends ContractTree, Options = never>(
     // it with the same schema, and a transform (string → number) would not survive a second pass.
     await parseWith(getChannel(leaves, leafPath).input, input)
 
-    // The transport's result is passed through untouched. For one-way leaves the
-    // call is typed `Promise<void>`, but the raw value (a queue receipt, an ack)
-    // stays reachable for edges that want it.
+    // The transport's result is passed through untouched. One-way calls are typed
+    // `Promise<unknown>` so the raw value (a queue receipt, an ack) is reachable
+    // without a cast.
     return await transport(leafPath, input, options)
   }
 }

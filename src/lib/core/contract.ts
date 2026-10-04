@@ -29,8 +29,9 @@ export type OneWayContract = {
  * client validates `input` before sending, the router validates it again before dispatching, and
  * the router validates the resolver's return value against `output` before the result leaves the
  * server — the client returns the transport's value as-is. With a bare schema (`channel(schema)`)
- * it is one-way: the resolver's return value is discarded and the client types the call
- * `Promise<void>`. Schemas are anything implementing Standard Schema (Zod, Valibot, ArkType, ...).
+ * it is one-way: the resolver's return value is discarded and the client resolves the call with
+ * whatever the transport returned (a queue receipt, an ack), typed `unknown`. Schemas are anything
+ * implementing Standard Schema (Zod, Valibot, ArkType, ...).
  */
 export function channel<
   Input extends StandardSchemaV1,

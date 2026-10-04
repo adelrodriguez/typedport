@@ -21,10 +21,11 @@ type ChannelHelpers<Input extends StandardSchemaV1, Output extends StandardSchem
 
 /**
  * The Proxy-backed client shape for a contract: every leaf is directly callable — leaves with an
- * `output` schema resolve with the result, one-way leaves resolve `void` — and every leaf carries
- * `$`-helpers. When the transport declares options, every call accepts them positionally and every
- * level of the tree exposes `$with(options)`, which returns the same (sub)client with those options
- * bound — per-call options shallow-merge over bound ones.
+ * `output` schema resolve with the result, one-way leaves resolve with whatever the transport
+ * returned, as `unknown` — and every leaf carries `$`-helpers. When the transport declares options,
+ * every call accepts them positionally and every level of the tree exposes `$with(options)`, which
+ * returns the same (sub)client with those options bound — per-call options shallow-merge over bound
+ * ones.
  */
 export type InferClient<Tree, Options = never> = {
   [Key in keyof Tree]: Tree[Key] extends Channel<infer Input, infer Output>
@@ -34,7 +35,7 @@ export type InferClient<Tree, Options = never> = {
               input: StandardSchemaV1.InferInput<Input>,
               options?: Options
             ) => Promise<StandardSchemaV1.InferOutput<Output>>
-          : (input: StandardSchemaV1.InferInput<Input>, options?: Options) => Promise<void>)
+          : (input: StandardSchemaV1.InferInput<Input>, options?: Options) => Promise<unknown>)
     : InferClient<Tree[Key], Options>
 } & ([Options] extends [never]
   ? unknown

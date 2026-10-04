@@ -13,10 +13,10 @@ typedport has four entry points:
 
 Creates one leaf of a contract.
 
-| Form                         | Kind       | Client call resolves with | Router does with the resolver's return value |
-| ---------------------------- | ---------- | ------------------------- | -------------------------------------------- |
-| `channel({ input, output })` | Round trip | The result                | Parses it against `output`, then returns it  |
-| `channel(schema)`            | One-way    | `void`                    | Discards it                                  |
+| Form                         | Kind       | Client call resolves with              | Router does with the resolver's return value |
+| ---------------------------- | ---------- | -------------------------------------- | -------------------------------------------- |
+| `channel({ input, output })` | Round trip | The result                             | Parses it against `output`, then returns it  |
+| `channel(schema)`            | One-way    | The transport's value, typed `unknown` | Discards it                                  |
 
 Every schema is a [Standard Schema](https://standardschema.dev).
 
@@ -88,7 +88,7 @@ client.files.save(input, options) // with transport options
 
 Before it calls the transport, the leaf parses `input` and rejects with a `ChannelError` with code `validation` on failure. It then sends `input` as the caller wrote it, not the parsed value.
 
-The call resolves with whatever the transport returns, without parsing it. A one-way leaf is typed `Promise<void>`, but it still resolves with the transport's raw value, such as a queue receipt.
+The call resolves with whatever the transport returns, without parsing it. A one-way leaf is typed `Promise<unknown>` and resolves with the transport's raw value, such as a queue receipt, or `undefined` over `router.dispatch`.
 
 Every node has these properties:
 
