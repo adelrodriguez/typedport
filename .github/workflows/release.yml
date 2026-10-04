@@ -47,6 +47,7 @@ jobs:
         with:
           publish: pnpm run release
           version: pnpm run version
+          title: "chore: release"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
