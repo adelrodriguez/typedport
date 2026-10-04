@@ -67,8 +67,8 @@ app.post("/messages/:path", async (c) => {
     // A signed message that fails validation will fail the same way on every
     // retry, so tell QStash to stop. Anything else is worth retrying.
     if (
-      error instanceof SyntaxError ||
-      (error instanceof ChannelError && error.code === "validation")
+      error instanceof SyntaxError
+      || (error instanceof ChannelError && error.code === "validation")
     ) {
       return new Response("Invalid message", {
         headers: { "Upstash-NonRetryable-Error": "true" },

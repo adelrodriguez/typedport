@@ -1,4 +1,5 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec"
+import { isRecord } from "./guards"
 
 /**
  * The discriminated payload of a `ChannelError`, one variant per failure the library itself can
@@ -60,10 +61,12 @@ class ChannelBaseError extends Error {
  * `instanceof ChannelError` then `error.code === "..."` narrows the fields. Anything a resolver
  * throws is not wrapped: an error that is not a `ChannelError` came from application code.
  */
+// oxlint-disable-next-line no-redeclare -- the type and the constructor below share the public name, like a class
 export type ChannelError = ChannelBaseError & ChannelErrorDetail
 
 // The base class assigns the detail's fields onto the instance; this cast is what lets the type
 // system see them, making `code` narrow the per-code fields after an `instanceof` check.
+// oxlint-disable-next-line typescript/consistent-type-assertions -- see above
 export const ChannelError = ChannelBaseError as unknown as new (
   detail: ChannelErrorDetail,
   options?: ErrorOptions
@@ -97,35 +100,26 @@ export function detailOf(detail: ChannelErrorDetail): ChannelErrorDetail {
  * only as trustworthy as the peer. Returns `undefined` for an unknown code or mistyped fields.
  */
 export function parseDetail(value: unknown): ChannelErrorDetail | undefined {
-  if (typeof value !== "object" || value === null || !("code" in value)) {
+  if (!isRecord(value)) {
     return undefined
   }
 
-  const candidate = value as {
-    code: unknown
-    issues?: unknown
-    path?: unknown
-    timeoutMs?: unknown
-  }
+  const { code, issues, path, timeoutMs } = value
 
-  switch (candidate.code) {
+  switch (code) {
     case "closed":
     case "malformed-envelope":
     case "no-router":
-      return { code: candidate.code }
+      return { code }
     case "output-validation":
     case "validation":
-      return isIssueList(candidate.issues)
-        ? { code: candidate.code, issues: candidate.issues }
-        : undefined
+      return isIssueList(issues) ? { code, issues } : undefined
     case "timeout":
-      return typeof candidate.path === "string" && typeof candidate.timeoutMs === "number"
-        ? { code: "timeout", path: candidate.path, timeoutMs: candidate.timeoutMs }
+      return typeof path === "string" && typeof timeoutMs === "number"
+        ? { code: "timeout", path, timeoutMs }
         : undefined
     case "unknown-channel":
-      return typeof candidate.path === "string"
-        ? { code: "unknown-channel", path: candidate.path }
-        : undefined
+      return typeof path === "string" ? { code: "unknown-channel", path } : undefined
     default:
       return undefined
   }
@@ -138,15 +132,15 @@ function isIssueList(value: unknown): value is readonly StandardSchemaV1.Issue[]
 // The Standard Schema issue shape: a string `message` and an optional `path` of property keys or
 // `{ key }` segments. Consumers walk `path` freely, so a malformed one must not get through.
 function isIssue(value: unknown): boolean {
-  if (typeof value !== "object" || value === null) {
+  if (!isRecord(value)) {
     return false
   }
 
-  const { message, path } = value as { message?: unknown; path?: unknown }
+  const { message, path } = value
 
   return (
-    typeof message === "string" &&
-    (path === undefined || (Array.isArray(path) && everySlot(path, isPathSegment)))
+    typeof message === "string"
+    && (path === undefined || (Array.isArray(path) && everySlot(path, isPathSegment)))
   )
 }
 
@@ -169,9 +163,7 @@ function isPathSegment(value: unknown): boolean {
     return true
   }
 
-  return (
-    typeof value === "object" && value !== null && isPropertyKey((value as { key?: unknown }).key)
-  )
+  return isRecord(value) && isPropertyKey(value.key)
 }
 
 function isPropertyKey(value: unknown): value is PropertyKey {

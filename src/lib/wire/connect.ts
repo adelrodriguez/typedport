@@ -2,6 +2,7 @@ import type { Transport } from "../core/transport"
 import type { Router } from "../server/router"
 import type { Wire } from "./types"
 import { ChannelError } from "../core/error"
+import { isRecord } from "../core/guards"
 import { deferWire, subscribe } from "./deferred"
 import { fromWire, serializeError, toWire, type WireResult } from "./envelope"
 
@@ -57,11 +58,12 @@ export function connect<Context = void>(
           // peer's resolver would still run. Anything that isn't a request
           // (responses to calls the peer somehow made this early) still flows.
           (data) => {
-            const message = data as { kind?: string; id?: number }
-            return message.kind !== "req" || (message.id !== undefined && pending.has(message.id))
+            const message = parseMessage(data)
+            return message?.kind !== "req" || pending.has(message.id)
           }
         )
   const { context, router, timeoutMs } = options
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- `Router<Context>`'s rest tuple is a conditional TypeScript cannot resolve for a generic Context
   const dispatch = router?.dispatch as
     | ((path: string, raw: unknown, context?: Context) => Promise<unknown>)
     | undefined
@@ -184,17 +186,11 @@ export function connect<Context = void>(
 }
 
 function parseMessage(data: unknown): WireMessage | undefined {
-  if (typeof data !== "object" || data === null) {
+  if (!isRecord(data)) {
     return undefined
   }
 
-  const message = data as {
-    id?: unknown
-    kind?: unknown
-    path?: unknown
-    payload?: unknown
-    result?: unknown
-  }
+  const message = data
 
   if (typeof message.id !== "number") {
     return undefined

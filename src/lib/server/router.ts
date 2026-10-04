@@ -62,21 +62,22 @@ type CreateRouter = {
 // the tree overload instantiates FragmentTree with the bare ContractTree constraint, whose index
 // signature recurses without terminating (TS2589). Concrete contracts are finite, so call sites
 // are unaffected; the cast stands in for the compatibility check.
+// oxlint-disable-next-line typescript/consistent-type-assertions -- see above
 export const createRouter: CreateRouter = buildRouter as CreateRouter
 
 type AnyResolver = (input: unknown, context?: unknown) => unknown
 
 function buildRouter(contract: ContractTree, resolvers: object): Router<never> {
   const leaves = flatten(contract)
-  const source = (
-    isHandlerTree(resolvers) ? flattenFragments(contract, resolvers) : resolvers
-  ) as Record<string, unknown>
+  const source: object = isHandlerTree(resolvers)
+    ? flattenFragments(contract, resolvers)
+    : resolvers
   // Snapshotted with no prototype, like `leaves`: an untrusted path such as "constructor" misses
   // both maps instead of resolving to an `Object.prototype` member.
   const resolverMap: Record<string, AnyResolver> = Object.create(null)
 
   for (const path of Object.keys(leaves)) {
-    const resolver = Object.hasOwn(source, path) ? source[path] : undefined
+    const resolver: unknown = Object.hasOwn(source, path) ? Reflect.get(source, path) : undefined
 
     // Fail at construction, as a handler tree does, rather than letting a forgotten leaf surface
     // as `unknown-channel` on its first call.
@@ -84,6 +85,7 @@ function buildRouter(contract: ContractTree, resolvers: object): Router<never> {
       throw new SetupError({ code: "missing-resolver", path })
     }
 
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- a resolver's parameters are typed by its leaf; dispatch parses before it calls
     resolverMap[path] = resolver as AnyResolver
   }
 

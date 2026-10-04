@@ -1,4 +1,5 @@
 import { ChannelError, type ChannelErrorDetail, detailOf, parseDetail } from "../core/error"
+import { isRecord } from "../core/guards"
 
 /**
  * An outcome flattened to a serializable value, so errors survive boundaries that structured-clone
@@ -60,25 +61,19 @@ export function fromWire(data: unknown): unknown {
 // Validates every field `fromWire` reads, down to the `ChannelError` detail: a forged detail with an
 // unknown code or mistyped fields would otherwise rehydrate into a broken error.
 function parseEnvelope(data: unknown): WireResult | undefined {
-  if (typeof data !== "object" || data === null || !("ok" in data)) {
+  if (!isRecord(data)) {
     return undefined
   }
 
-  const candidate = data as { error?: unknown; ok: unknown; result?: unknown }
-
-  if (candidate.ok === true) {
-    return { ok: true, result: candidate.result }
+  if (data.ok === true) {
+    return { ok: true, result: data.result }
   }
 
-  if (candidate.ok !== false || typeof candidate.error !== "object" || candidate.error === null) {
+  if (data.ok !== false || !isRecord(data.error)) {
     return undefined
   }
 
-  const { detail, message, name } = candidate.error as {
-    detail?: unknown
-    message?: unknown
-    name?: unknown
-  }
+  const { detail, message, name } = data.error
 
   if (typeof message !== "string" || typeof name !== "string") {
     return undefined

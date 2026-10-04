@@ -54,9 +54,11 @@ class SetupBaseError extends Error {
  *
  * `instanceof SetupError` then `error.code === "..."` narrows the fields.
  */
+// oxlint-disable-next-line no-redeclare -- the type and the constructor below share the public name, like a class
 export type SetupError = SetupBaseError & SetupErrorDetail
 
 // Same construction as ChannelError: the cast lets `code` narrow the per-code fields.
+// oxlint-disable-next-line typescript/consistent-type-assertions -- see above
 export const SetupError = SetupBaseError as unknown as new (
   detail: SetupErrorDetail,
   options?: ErrorOptions

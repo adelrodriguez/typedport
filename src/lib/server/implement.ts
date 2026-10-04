@@ -1,6 +1,7 @@
 import type { Join } from "../core/types"
 import type { Resolver } from "./types"
 import { type Channel, type ContractTree, isChannel, joinPath } from "../core/contract"
+import { isRecord } from "../core/guards"
 import { SetupError } from "../core/setup-error"
 
 /**
@@ -48,6 +49,7 @@ export type Implementer<Tree, Context = void, Prefix extends string = ""> = {
  * has the required shape.
  */
 export function implement<Tree extends ContractTree>(contract: Tree): Implementer<Tree> {
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- `build` mirrors the contract at runtime; only the contract's type knows the shape
   return build(contract, "") as Implementer<Tree>
 }
 
@@ -146,11 +148,11 @@ export function flattenFragments(
         continue
       }
 
-      if (typeof value !== "object" || value === null) {
+      if (!isRecord(value)) {
         throw new SetupError({ code: "invalid-handler", expected: "branch", path })
       }
 
-      walk(child, value as Record<string, unknown>, path)
+      walk(child, value, path)
     }
   }
 }

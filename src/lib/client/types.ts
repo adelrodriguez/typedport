@@ -28,8 +28,8 @@ type ChannelHelpers<Input extends StandardSchemaV1, Output extends StandardSchem
  */
 export type InferClient<Tree, Options = never> = {
   [Key in keyof Tree]: Tree[Key] extends Channel<infer Input, infer Output>
-    ? ChannelHelpers<Input, Output> &
-        (Output extends StandardSchemaV1
+    ? ChannelHelpers<Input, Output>
+        & (Output extends StandardSchemaV1
           ? (
               input: StandardSchemaV1.InferInput<Input>,
               options?: Options

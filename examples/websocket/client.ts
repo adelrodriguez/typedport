@@ -29,8 +29,9 @@ console.log("2 + 3 =", await api.math.add({ a: 2, b: 3 }))
 
 // The server's router rejects bad input; the error arrives here as a real
 // ChannelError (code "validation") thanks to the wire envelope.
-await api.math.add({ a: 2, b: "three" as unknown as number }).catch((error: unknown) => {
-  console.log("server rejected:", (error as Error).message)
+// @ts-expect-error -- deliberately off-contract input
+await api.math.add({ a: 2, b: "three" }).catch((error: unknown) => {
+  console.log("server rejected:", error instanceof Error ? error.message : error)
 })
 
 // Watch a few pushes, then hang up.
