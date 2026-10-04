@@ -23,9 +23,10 @@ This guide uses two contracts. `contract` holds the calls from the renderer to m
      const push = createClient(pushContract, transport) // calls into the renderer
 
      sendPort(win, port2, "typedport:port")
+     port1.on("close", () => close(new Error("port disconnected")))
      win.on("closed", () => close(new Error("window closed")))
 
-     return push
+     return { close, push }
    }
    ```
 
@@ -69,7 +70,14 @@ You don't need a ready handshake. A port holds messages until its listener start
 
 ## Handle a reload
 
-A port can be transferred only once. When the window reloads, create a new `MessageChannelMain` and call `attach` again from your own `did-finish-load` handler. Do the same after a failed navigation, because the old port may have gone to a page that never loaded.
+A port can be transferred only once. When the window reloads, call `attach` again from your own `did-finish-load` handler to create a new channel. Do the same after a failed navigation, because the old port may have gone to a page that never loaded.
+
+Close the old session first. Otherwise its resolvers keep running and its listeners stay attached until the window closes:
+
+```typescript
+session.close(new Error("page reloaded"))
+session = attach(win)
+```
 
 ## Know what the hand-off blocks
 

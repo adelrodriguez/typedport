@@ -30,7 +30,7 @@ Add a schema library too. These docs use Zod.
 
 In this section, we build a contract with two channels, serve it, and call it. Everything runs in one process, so we need no server and no network.
 
-Create `rpc.ts` and define the contract. It has one round trip, `greetings.hello`, which returns a string, and one one-way channel, `log`, which returns nothing:
+Create `rpc.mts` and define the contract. The `.mts` extension makes the file an ES module, which the top-level `await` calls below need. It has one round trip, `greetings.hello`, which returns a string, and one one-way channel, `log`, which returns nothing:
 
 ```typescript
 import { ChannelError, channel, createClient, createRouter, defineContract } from "typedport"
@@ -64,7 +64,7 @@ console.log(await client.greetings.hello({ name: "Ada" }))
 await client.log("ping")
 ```
 
-Run the file with `npx tsx rpc.ts`. You see:
+Run the file with `npx tsx rpc.mts`. You see:
 
 ```text
 Hello, Ada!

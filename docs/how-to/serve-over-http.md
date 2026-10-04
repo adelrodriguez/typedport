@@ -64,6 +64,6 @@ toWire(router.dispatch(path, payload), {
 
 `fromWire` reads success from the envelope, not from the status code. The status codes exist for logs and middleware.
 
-If a proxy returns an HTML error page instead of an envelope, `fromWire` throws a `ChannelError` with code `malformed-envelope`.
+If a proxy returns an HTML error page, `response.json()` throws a `SyntaxError` before `fromWire` runs. If the body is valid JSON but not an envelope, `fromWire` throws a `ChannelError` with code `malformed-envelope`.
 
 Put auth headers, retries, and anything else HTTP-specific in the transport function. The rest of typedport never sees them.
