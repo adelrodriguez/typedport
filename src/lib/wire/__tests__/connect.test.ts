@@ -66,6 +66,39 @@ function createConnectedPeers() {
   }
 }
 
+// A serving end whose resolver records its signal and only settles on abort.
+function createServingPeer(options: { onHidden?: (error: unknown) => void } = {}) {
+  const [serverWire, clientWire] = createWirePair()
+  const signals: AbortSignal[] = []
+  const sent: unknown[] = []
+  let started: (() => void) | undefined
+  const running = new Promise<void>((resolve) => {
+    started = resolve
+  })
+  const router = createRouter(pullContract, {
+    "math.add": (_input, { signal }) =>
+      new Promise<number>((_resolve, reject) => {
+        signals.push(signal)
+        started?.()
+        signal.addEventListener("abort", () => {
+          reject(new Error("stopped"))
+        })
+      }),
+  })
+  const tappedServerWire: Wire = {
+    onMessage: serverWire.onMessage,
+    send: (data) => {
+      sent.push(data)
+      serverWire.send(data)
+    },
+  }
+
+  const server = connect(tappedServerWire, { onHidden: options.onHidden, router })
+  const client = connect(clientWire, { timeoutMs: 1000 })
+
+  return { client, running, sent, server, signals }
+}
+
 describe("connect", () => {
   test("round-trips in both directions over one pipe", async () => {
     const { api, push } = createConnectedPeers()
@@ -217,38 +250,6 @@ describe("connect", () => {
   })
 
   describe("cancellation reaches the peer's resolver", () => {
-    function createServingPeer(options: { onHidden?: (error: unknown) => void } = {}) {
-      const [serverWire, clientWire] = createWirePair()
-      const signals: AbortSignal[] = []
-      const sent: unknown[] = []
-      let started: (() => void) | undefined
-      const running = new Promise<void>((resolve) => {
-        started = resolve
-      })
-      const router = createRouter(pullContract, {
-        "math.add": (_input, { signal }) =>
-          new Promise<number>((_resolve, reject) => {
-            signals.push(signal)
-            started?.()
-            signal.addEventListener("abort", () => {
-              reject(new Error("stopped"))
-            })
-          }),
-      })
-      const tappedServerWire: Wire = {
-        onMessage: serverWire.onMessage,
-        send: (data) => {
-          sent.push(data)
-          serverWire.send(data)
-        },
-      }
-
-      const server = connect(tappedServerWire, { onHidden: options.onHidden, router })
-      const client = connect(clientWire, { timeoutMs: 1000 })
-
-      return { client, running, sent, server, signals }
-    }
-
     test("an aborted call aborts the peer's signal, with no reply and nothing hidden", async () => {
       const hidden: unknown[] = []
       const { client, running, sent, signals } = createServingPeer({
