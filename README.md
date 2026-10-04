@@ -1,489 +1,119 @@
 <p align="center">
-  <h1 align="center">🚌 <code>typedport</code></h1>
+  <h1 align="center"><code>typedport</code></h1>
   <p align="center">
     <strong>Type-safe RPC over any transport</strong>
   </p>
 </p>
 
 > [!WARNING]
-> This library is a work in progress. The API is not stable yet.
+> typedport is pre-1.0. Expect breaking changes in minor releases.
 
-**typedport** turns a nested schema tree into a strongly-typed RPC client and a validating router, with the transport left to you. Define your contract once. One side gets a tRPC-style Proxy client, the other gets a dispatcher that enforces the schemas. It works over Electron IPC, a message queue, a WebSocket, or a plain in-memory function call.
+You write a contract once, as a tree of schemas. typedport turns it into two things. The caller gets a typed client, where `client.files.open()` is a function call. The receiver gets a router that validates every input before your code sees it.
 
-## Features
+What sits between them is up to you. A transport is one function, `(path, payload) => result`, so the same contract runs over Electron IPC, a worker thread, a WebSocket, an HTTP endpoint, a message queue, or a direct in-memory call.
 
-- **Type-safe.** The contract infers client inputs and outputs, resolver signatures, and error shapes. No generated code.
-- **Any Standard Schema.** [Zod](https://zod.dev), [Valibot](https://valibot.dev), [ArkType](https://arktype.io), or anything else implementing [Standard Schema](https://standardschema.dev).
-- **Nested contracts.** Organize operations as a tree (`localFiles.open`). Dotted paths fall out automatically.
-- **Validated at the boundary.** The router parses input against your schema before any resolver runs, and parses results against `output` on the way out, so an off-contract resolver fails loudly.
-- **One leaf constructor.** `channel({ input, output })` is a round trip, `channel(schema)` is one-way. Every leaf is directly callable on the client.
-- **Handlers where the code lives.** `implement(contract)` builds one handler at a time with full inference, one file per branch. `createRouter` assembles them and refuses to compile with a leaf missing.
-- **Bring your transport.** A transport is a single function `(path, payload, options?) => result`. `router.dispatch` is already one. Per-call options (an `AbortSignal`, a transfer list) flow through untouched.
-- **`typedport/wire`.** A serializable error envelope, `connect` for turning any duplex pipe into a symmetric transport, and shipped wires for the common pipes: MessagePorts (DOM, Electron, Node) and WebSockets.
+- Types come from the contract. There is no codegen step.
+- Schemas can come from any [Standard Schema](https://standardschema.dev) library, such as [Zod](https://zod.dev), [Valibot](https://valibot.dev), or [ArkType](https://arktype.io).
+- The router parses the input before a resolver runs and parses the result before it leaves. A resolver that returns the wrong shape fails on the server, so the caller never gets bad data.
+- A missing resolver is a compile error.
+- `typedport/wire` carries errors across serialization, hiding server-side details by default. It also turns message pipes into request/response calls you can cancel, and it ships wires for MessagePorts and WebSockets.
 
-## Installation
+## Install
 
 ```bash
 pnpm add typedport
 ```
 
-Plus your schema library of choice (`zod`, `valibot`, `arktype`, ...). The examples below use Zod.
+Add a schema library too. These docs use Zod.
 
-## Usage
+## Build your first contract
 
-Define a contract:
+In this section, we build a contract with two channels, serve it, and call it. Everything runs in one process, so we need no server and no network.
+
+Create `rpc.ts` and define the contract. It has one round trip, `greetings.hello`, which returns a string, and one one-way channel, `log`, which returns nothing:
 
 ```typescript
-import { defineContract, channel } from "typedport"
+import { ChannelError, channel, createClient, createRouter, defineContract } from "typedport"
 import * as z from "zod"
 
-const LocalTextFile = z.object({ contents: z.string(), path: z.string() })
-
-export const contract = defineContract({
-  localFiles: {
-    open: channel({ input: z.void(), output: LocalTextFile.nullable() }),
-    save: channel(LocalTextFile), // input only → one-way, resolves void
+const contract = defineContract({
+  greetings: {
+    hello: channel({ input: z.object({ name: z.string() }), output: z.string() }),
   },
-  stripe: {
-    checkout: {
-      created: channel(z.object({ id: z.string() })),
-    },
-  },
+  log: channel(z.string()),
 })
 ```
 
-Implement it with a router. The router is the trust boundary: it parses input before your resolver runs. The resolver map is contextually typed from the contract, so parameters are inferred and a missing or typo'd path is a compile error:
+Now implement it with a router. Each key is a dotted path from the contract. Hover over `name` or `message` in your editor, and you see that TypeScript already knows their types:
 
 ```typescript
-import { createRouter } from "typedport"
-
 const router = createRouter(contract, {
-  "localFiles.open": async () => openFile(),
-  "localFiles.save": async ({ path, contents }) => saveFile(path, contents),
-  "stripe.checkout.created": async ({ id }) => record(id),
+  "greetings.hello": ({ name }) => `Hello, ${name}!`,
+  log: (message) => {
+    console.log("server got:", message)
+  },
 })
-
-// An adapter feeds untrusted (path, input) pairs into:
-await router.dispatch("localFiles.save", rawInput)
 ```
 
-Resolvers take a second argument, `{ context, signal }`:
-
-- **`context`** is whatever the edge knows about the caller (the authenticated user, `event.senderFrame`, the socket session). The edge passes it per call: `router.dispatch(path, raw, { context: session })`.
-- **`signal`** aborts when the caller gives up. Pass it on to `fetch`, a database driver, or a model call. It's always present, and it never aborts if the edge didn't pass one. `dispatch` also rejects with the abort reason straight away, even if the resolver ignores its signal.
-
-```typescript
-const router = createRouter<typeof contract, Session>(contract, {
-  "reports.generate": async ({ id }, { context, signal }) =>
-    generate(id, { owner: context.userId, signal }),
-})
-
-await router.dispatch("reports.generate", raw, { context: session, signal })
-```
-
-With the default `Context = void`, the options argument is optional and `dispatch` is a valid `Transport`: `createClient(contract, router.dispatch)` wires the whole stack in memory, with `$with({ signal })` to cancel.
-
-Call it with a client. A transport is one function, and every leaf is directly callable:
-
-```typescript
-import { createClient } from "typedport"
-
-const client = createClient(contract, (path, payload) => myWire.send(path, payload))
-
-const file = await client.localFiles.open()
-await client.localFiles.save({ path: "/tmp/a.txt", contents: "hi" })
-await client.stripe.checkout.created({ id: "evt_123" })
-
-client.localFiles.save.$path // "localFiles.save"
-client.localFiles.save.$input // the input schema. For a bare-schema leaf, the schema itself
-client.localFiles.open.$output // the output schema, or undefined on one-way leaves
-```
-
-Leaves with an `output` schema resolve with the result. One-way leaves are typed `Promise<void>`. The client validates input at the call site before it reaches the transport, and the router validates again on arrival.
-
-`router.dispatch` is itself a valid transport, so wiring client to router directly, the whole stack with no I/O, is one line:
+Next, create a client. A client needs a transport, and `router.dispatch` is already one, so we pass it in directly:
 
 ```typescript
 const client = createClient(contract, router.dispatch)
+
+console.log(await client.greetings.hello({ name: "Ada" }))
+await client.log("ping")
 ```
 
-## Implementing a contract with `implement()`
+Run the file with `npx tsx rpc.ts`. You see:
 
-The flat map above is the right tool at small sizes. Past a dozen channels it turns into one giant object, so `implement` lets each handler live next to its domain code instead:
-
-```typescript
-// contract.ts
-import { implement } from "typedport"
-
-type Session = { userId: string }
-
-export const tp = implement(contract).$context<Session>()
+```text
+Hello, Ada!
+server got: ping
 ```
 
-```typescript
-// local-files/handlers.ts — zero annotations, everything inferred from the contract
-import { tp } from "../contract"
-
-export const open = tp.localFiles.open(async (_input, { context }) => openFile(context.userId))
-export const save = tp.localFiles.save(async ({ path, contents }) => saveFile(path, contents))
-```
+Finally, send the router a bad input. The client won't let us, because `{ name: 42 }` is a type error and the client also parses the input at runtime. So we call `router.dispatch` directly, the way an untrusted sender would:
 
 ```typescript
-// router.ts — assembly is where completeness is enforced
-import { createRouter } from "typedport"
-import * as localFiles from "./local-files/handlers"
-import { created } from "./stripe/handlers"
-
-export const router = createRouter(contract, {
-  localFiles,
-  stripe: { checkout: { created } },
-})
-```
-
-The handler object mirrors the contract's shape, and a namespace import of a one-file-per-branch handler module already has it. What the compiler enforces at the assembly site:
-
-- **A missing handler is a missing property.** TypeScript names the leaf in the error.
-- **Position and identity must agree.** Each fragment carries its dotted path as a brand, so the `save` handler cannot occupy the `open` slot, and a fragment built from a different contract cannot fill in even when the names collide.
-- **Contexts must agree.** A fragment built without `$context` cannot join a `Session` tree.
-- **Stray exports are ignored.** The router walks the contract, not the handler object, so a helper exported next to the fragments doesn't break assembly.
-
-`$context<Session>()` is the only place the context type is written. Fragments carry it from there, and `createRouter` infers it back out of them, so `dispatch` demands a `Session` without any explicit type arguments. If you need the flat map with a context instead, declare it the old way: `createRouter<typeof contract, Session>(contract, resolvers)`.
-
-`InferResolvers<typeof contract, Context>` still exists for typing a flat map defined away from the `createRouter` call.
-
-## Per-call options
-
-A transport may declare a third `options` parameter for per-call edge mechanics (an `AbortSignal`, an Electron transfer list, an HTTP method) that never travel in the payload. The type is inferred from the transport's own annotation and flows to every call site. `$with(options)` on the root or any subtree returns the same client with options bound, so leaves with `void` inputs need no `undefined` placeholder:
-
-```typescript
-const api = createClient(contract, async (path, payload, options?: { signal?: AbortSignal }) => {
-  return await sendOverTheWire(path, payload, options?.signal)
-})
-
-await api.localFiles.save(file, { signal: controller.signal }) // positional
-await api.$with({ signal: controller.signal }).localFiles.open() // bound
-
-const cancellable = api.$with({ signal: controller.signal })
-await cancellable.stripe.checkout.created({ id: "evt_123" }) // bound options apply to every call
-```
-
-Per-call options shallow-merge over bound ones. When the transport declares no options, none of this exists in the type. Calls are `(input)` and `$with` is absent.
-
-## Validation model
-
-Input is validated twice by design. The client validates before sending so the caller gets an error with a stack trace at the call site, then discards the parsed result and sends the input as written. Only the router's parsed value (defaults applied, `"21"` transformed to `21`) reaches the resolver, though transform callbacks run on both sides. The router parses before dispatching because the sender may not be your client at all. In transports like Electron IPC the receiving process must treat every message as untrusted. Only the router's parse is a security boundary.
-
-Results flow the other way with one parse. The router validates the resolver's return against `output` before it leaves the server, and the client returns the transport's value as-is. When the peer is a typedport router the result is schema-checked end to end. When it isn't (a plain HTTP endpoint, a mock), the client's return type is a promise, not a guarantee, so validate at the edge if you don't trust the peer. The pieces are already in hand: `parseWith` is the same parse the router uses, and every round-trip leaf carries its schema as `$output`:
-
-```typescript
-import { parseWith } from "typedport"
-
-const raw = await api.localFiles.open()
-const file = await parseWith(api.localFiles.open.$output, raw) // now a guarantee, not a claim
-```
-
-Every failure of a call is a `ChannelError`, discriminated by `code`: `validation` (the caller's input failed, with the Standard Schema `issues`), `output-validation` (the resolver's result drifted off contract, which is the server's fault, not the caller's), `unknown-channel` (with the `path`), the `connect` lifecycle codes `timeout`, `closed` (also raised by `whenOpen` for a socket that never opened), and `no-router`, and `malformed-envelope` (`fromWire` got something that isn't an envelope). One `instanceof`, then `code` narrows the fields. Mistakes in wiring things up (a reserved contract key, a missing resolver, a port hand-off with no window) throw a `SetupError` instead, with its own `code`s. It never crosses the wire. Anything that is neither came from application code:
-
-```typescript
-import { ChannelError } from "typedport"
-
 try {
-  await router.dispatch(path, raw)
+  await router.dispatch("greetings.hello", { name: 42 })
 } catch (error) {
   if (error instanceof ChannelError && error.code === "validation") {
-    return badRequest(error.issues)
+    console.log("rejected:", error.issues[0]?.message)
   }
-  throw error // unknown channel, or the resolver itself failed
 }
 ```
 
-Authenticity is the transport's job, not the core's. An HTTP adapter verifies signatures. An Electron adapter relies on process identity and a channel allowlist (`router.channels`). The core guarantees one thing everywhere: no resolver runs on unparsed input.
+Run the file again. The resolver never runs, and you see a new line:
 
-## `typedport/wire`
-
-Two problems every real boundary hits, solved once in an optional subpath.
-
-**Errors don't survive serialization.** A thrown `ChannelError` gets flattened by `invoke`, structured clone, or JSON. `toWire` and `fromWire` are the codec. `toWire` captures any operation's outcome as a serializable value, and `fromWire` unwraps it on the other side, returning the result or rethrowing. `ChannelError` comes back rehydrated with its code and fields intact, so `instanceof` and `code` checks work across the boundary:
-
-```typescript
-import { fromWire, toWire } from "typedport/wire"
-
-// server edge — never throws, always resolves a serializable WireResult
-ipcMain.handle(channel, (_event, payload) => toWire(router.dispatch(channel, payload)))
-
-// client edge — unwraps the result or rethrows, ChannelError intact
-const api = createClient(contract, async (path, payload) =>
-  fromWire(await window.typedport.send(path, payload))
-)
+```text
+rejected: Invalid input: expected string, received number
 ```
 
-`toWire` takes the operation's promise, or a thunk when the operation can throw synchronously. `fromWire(await toWire(x))` returns what `x` resolved with, or rethrows what it threw.
+We now have a contract, a router that guards it, and a typed client. To move the router into another process, replace `router.dispatch` with a transport that crosses the boundary. The guides below show how.
 
-The far side of a serializing boundary is often a browser, so `toWire` hides failures by default. Caller-fault `ChannelError`s (`validation`, `unknown-channel`, `no-router`) cross intact, since they tell the caller what to fix and reveal nothing about the server. Everything else, including application errors and `output-validation` (whose `issues` describe the server's own data), crosses as a `ChannelError` with code `internal`, so the client can still branch on it. `expose` lets more through, and `onHidden` receives what was hidden, for your logs:
+## Documentation
 
-```typescript
-toWire(router.dispatch(path, payload), {
-  expose: (error) => error instanceof NotFoundError,
-  onHidden: (error) => logger.error(error),
-})
-```
+How-to guides:
 
-**Message pipes have no request/response.** `postMessage`-shaped channels (MessagePorts, workers, WebSockets) need correlation ids, a pending map, timeouts, and teardown. `connect` owns all of that, over a minimal `Wire`, which is anything that can send a value and hand incoming values to a listener:
+- [Split handlers across files](./docs/how-to/split-handlers-across-files.md)
+- [Pass per-call options like an `AbortSignal`](./docs/how-to/pass-per-call-options.md)
+- [Cancel a call and stop its resolver](./docs/how-to/cancel-calls.md)
+- [Serve a contract over HTTP](./docs/how-to/serve-over-http.md)
+- [Call the Electron main process over IPC](./docs/how-to/call-electron-main-over-ipc.md)
+- [Call in both directions over Electron MessagePorts](./docs/how-to/call-over-electron-message-ports.md)
+- [Write your own transport](./docs/how-to/write-a-transport.md)
 
-```typescript
-import { connect, type Wire } from "typedport/wire"
+Reference:
 
-const { transport, close, closed } = connect(wire, {
-  router, // serve incoming requests from the peer; omit for a call-only end
-  context: session, // per-connection: passed to every dispatch this end serves
-  timeoutMs: 5000, // reject a pending call if no response arrives
-  signal: controller.signal, // aborting closes the connection, like close()
-})
+- [API reference](./docs/reference.md)
 
-const api = createClient(contract, transport)
-await api.$with({ signal: AbortSignal.timeout(1000) }).notes.list() // cancel one call
-```
+Background:
 
-````
+- [About validation and trust](./docs/validation-and-trust.md)
 
-`connect` is symmetric. Call it on both ends of a duplex pipe, each with its own router, and each side gets a transport for calling the other. It speaks the envelope internally, so error fidelity comes for free. It hides failures the same way `toWire` does and takes the same `expose` and `onHidden` options. A trusted peer (a worker, your own processes) can see everything with `expose: () => true`.
+Runnable code:
 
-A call's `{ signal }` rejects that call with `signal.reason` and drops its late reply. A call that's aborted or times out also tells the other side, which aborts the `signal` its resolver received. Closing a session aborts every resolver that end is running. `close(reason?)`, or aborting the `signal` passed to `connect`, rejects everything in flight and every future call, and `closed` resolves with that `ChannelError` once it happens. Tie the session to whatever liveness signal the pipe has (a window's `closed`, a socket's `close`).
-
-`connect` also accepts a `Promise<Wire>`, for pipes that aren't ready yet: a port still being handed over, a socket still opening. Calls made in the meantime queue (bounded by `timeoutMs`) and flush when the wire arrives. `close` before arrival wins the race, and a rejected wire promise closes the connection with the rejection as `cause`.
-
-### Shipped wires
-
-The port flavors share an idea but not an interface, and hand-copied wrappers rot, so the common ones ship as subpaths. Everything is structurally typed, with no dependency on Electron or DOM types.
-
-`typedport/wire/message-port`:
-
-| Export        | Wraps                                                                |
-| ------------- | -------------------------------------------------------------------- |
-| `mainPort`    | Electron `MessagePortMain`, in the main process or a utility process |
-| `domPort`     | DOM `MessagePort`: renderers, iframes, web workers                   |
-| `nodePort`    | `node:worker_threads` ports, a `Worker`, or `parentPort`             |
-| `sendPort`    | Main process: ship a port to a window once it has loaded             |
-| `relayPort`   | Preload: relay ports from an IPC channel into the page               |
-| `receivePort` | Renderer: await the relayed port, with the source and type guarded   |
-
-`typedport/wire/web-socket`:
-
-| Export      | Does                                                                             |
-| ----------- | -------------------------------------------------------------------------------- |
-| `webSocket` | Wraps a browser/Node `WebSocket` or a `ws` socket as a `Wire` over JSON frames   |
-| `whenOpen`  | Resolves with the socket once it can send; pairs with the pending-wire `connect` |
-
-Two caveats on `webSocket`. Sockets carry frames, not values, so the envelope rides JSON there: payloads must survive JSON, unlike on the structured-clone transports. And `whenOpen` detaches its listeners once it settles, so on a `ws` socket Node's throw-on-unhandled-`error` default applies after open — attach your own `error` listener alongside the `close` one you wire to `session.close`.
-
-## Writing an adapter
-
-Transports live in your codebase, not in this package. A transport is one function, and the examples in this repo (worker threads, WebSocket, Hono, QStash) are the reference implementations. The supported toolkit:
-
-- **`flatten(contract)`.** The tree as a flat `Record<path, Channel>`, for edges that register endpoints ahead of time (`router.channels` is the same list of paths).
-- **`isChannel(node)`.** The discriminant for walking a `ContractTree` yourself.
-- **`parseWith(schema, value)`.** The single parse the client and router use. Reuse it to validate on a path the router never sees. Throws `ChannelError` with code `validation` and the Standard Schema `issues`.
-- **Types.** Annotate your adapter's function as `Transport` (declare an options parameter and it flows to every call site), accept contracts as `ContractTree`, and constrain one-way adapters to `OneWayContract` so a round-trip leaf is a compile error. `InferClient` and `Channel` cover the places you wrap or re-expose the client.
-- **`toWire` / `fromWire`** (from `typedport/wire`). The error codec for any serializing boundary, and `connect` when the boundary is a duplex message pipe.
-- **The shipped wires.** And when your pipe isn't one of them, a `Wire` is two properties. Write it inline.
-
-## Recipes
-
-A transport is one function, so most edges are one line:
-
-```typescript
-const memory = router.dispatch
-const electron = (path, input) => ipcRenderer.invoke(path, input)
-const queue = async (path, body) => queueClient.publishJSON({ url: `${baseUrl}/${path}`, body })
-const socket = connect(whenOpen(ws).then(webSocket), { timeoutMs: 5000 }).transport
-````
-
-One thing to keep straight: a one-way transport (a queue) paired with a leaf that declares an `output` is a contract error the core cannot catch at runtime. The client would resolve the publish receipt as if it were the result. Keep `output` off the leaves a one-way transport serves, and make the compiler enforce it: adapters built on one-way delivery should constrain their contract parameter to `OneWayContract`, which rejects any tree containing a round-trip leaf.
-
-A related trick falls out of the one-function design: a transport that awaits another transport is a transport. For `connect` pipes you don't need it, since `connect` takes the pending wire directly. For everything else, build the client eagerly over a deferred transport and calls made too early just wait:
-
-```typescript
-const ready = new Promise<Transport>((resolve) => {
-  /* resolve when the endpoint is known */
-})
-
-export const api = createClient(contract, async (path, payload) => (await ready)(path, payload))
-```
-
-<details>
-<summary><strong>HTTP / fetch</strong>: any framework that speaks Request/Response</summary>
-
-The server edge is a fetch handler (Hono, Next.js route handlers, Bun, and Deno all accept one). The wire envelope carries every outcome. Caller-fault `ChannelError`s arrive in the browser with their `code` and fields intact, and `toWire` hides everything else by default:
-
-```typescript
-import { toWire } from "typedport/wire"
-
-const handle = async (request: Request): Promise<Response> => {
-  const path = new URL(request.url).pathname.split("/").at(-1) ?? ""
-
-  if (!router.channels.includes(path)) {
-    return new Response("Unknown channel", { status: 404 })
-  }
-
-  // JSON has no undefined, so the client sends null for void inputs; map it
-  // back so z.void() leaves round-trip.
-  const wire = await toWire(router.dispatch(path, (await request.json()) ?? undefined), {
-    onHidden: (error) => console.error(error), // the real failure, for the server's logs
-  })
-
-  if (wire.ok) {
-    return Response.json(wire, { status: 200 })
-  }
-
-  return Response.json(wire, { status: wire.error.detail?.code === "validation" ? 400 : 500 })
-}
-```
-
-The client transport is a `fetch` call:
-
-```typescript
-import { createClient } from "typedport"
-import { fromWire } from "typedport/wire"
-
-const api = createClient(contract, async (path, payload) => {
-  const response = await fetch(`${baseUrl}/${path}`, {
-    body: JSON.stringify(payload ?? null),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  })
-
-  return fromWire(await response.json())
-})
-```
-
-Auth, retries, and headers live in the transport function. The core never sees them. The status codes are a courtesy for logs and middleware; `fromWire` decides success from the envelope, not the status.
-
-</details>
-
-<details>
-<summary><strong>Electron IPC</strong>: renderer client, main-process router over <code>invoke</code></summary>
-
-A Proxy cannot cross `contextBridge` (it gets structured-cloned), so expose only the transport function from the preload and build the typedport client in the renderer.
-
-```typescript
-// main.ts — the router is the trust boundary for untrusted renderer input
-import { ipcMain } from "electron"
-import { createRouter } from "typedport"
-import { contract } from "./contract"
-
-const router = createRouter(contract, {
-  // ...
-})
-
-for (const channel of router.channels) {
-  ipcMain.handle(channel, (_event, payload) => router.dispatch(channel, payload))
-}
-```
-
-```typescript
-// preload.ts — just the transport, nothing else
-import { contextBridge, ipcRenderer } from "electron"
-
-contextBridge.exposeInMainWorld("typedport", {
-  send: (path: string, payload: unknown) => ipcRenderer.invoke(path, payload),
-})
-```
-
-```typescript
-// renderer.ts
-import { createClient } from "typedport"
-import { contract } from "./contract"
-
-export const api = createClient(contract, (path, payload) => window.typedport.send(path, payload))
-```
-
-One-way leaves ride `invoke` too. The extra empty response is harmless and keeps the edge to a single function. Note that `ipcRenderer.invoke` re-throws only the error message string, so a `ChannelError` from the main process arrives in the renderer as a flat `Error`. If you need structured errors, wrap both edges in the `typedport/wire` envelope: `toWire(router.dispatch(channel, payload))` in the `handle` callback, `fromWire(await ...)` in the transport. Or use the MessagePort recipe below, which gets error fidelity and both directions from `connect`. If you load remote content, also check `event.senderFrame` before dispatching.
-
-</details>
-
-<details>
-<summary><strong>Electron MessagePort</strong>: bidirectional main ↔ renderer, and utility processes</summary>
-
-A port is duplex, so one `connect` per end gives you round trips in _both_ directions. Each side serves its own contract and calls the other's. The wires and the port hand-off ship in `typedport/wire/message-port`; what's left in your code is the lifecycle.
-
-Main creates the channel, keeps one end, and ships the other to the page:
-
-```typescript
-import { MessageChannelMain, type BrowserWindow } from "electron"
-import { createClient } from "typedport"
-import { connect } from "typedport/wire"
-import { mainPort, sendPort } from "typedport/wire/message-port"
-
-function attach(win: BrowserWindow) {
-  const { port1, port2 } = new MessageChannelMain()
-
-  const { transport, close } = connect(mainPort(port1), {
-    router: mainRouter, // serves the renderer → main contract
-    context: { windowId: win.id }, // passed to every resolver this connection serves
-    timeoutMs: 5_000, // a dead renderer rejects pending calls instead of hanging them
-  })
-  const push = createClient(pushContract, transport) // main → renderer, same port
-
-  sendPort(win, port2, "typedport:port")
-  win.on("closed", () => close(new Error("window closed")))
-
-  return push
-}
-```
-
-The preload is one line (a port cannot cross `contextBridge`, but `window.postMessage` can transfer it, and `relayPort` does exactly that):
-
-```typescript
-import { ipcRenderer } from "electron"
-import { relayPort } from "typedport/wire/message-port"
-
-relayPort(ipcRenderer, "typedport:port")
-```
-
-The renderer awaits the port and hands `connect` the pending wire, so `api` is importable before the port arrives:
-
-```typescript
-import { createClient, createRouter } from "typedport"
-import { connect } from "typedport/wire"
-import { domPort, receivePort } from "typedport/wire/message-port"
-
-const pushRouter = createRouter(pushContract, {
-  // ... resolvers for main → renderer calls
-})
-
-// Give up if the port hasn't arrived in 10s; the rejection closes the connection.
-const port = receivePort("typedport:port", { signal: AbortSignal.timeout(10_000) })
-
-const { transport } = connect(port.then(domPort), {
-  router: pushRouter,
-  timeoutMs: 5_000,
-})
-
-export const api = createClient(contract, transport)
-```
-
-No ready-handshake exists anywhere. Ports buffer until `start()` (the wires call it once their listener is attached), and `connect` buffers calls until the port lands. Call `attach` before or after `loadURL`: `sendPort` posts immediately when a page has already loaded and waits for `did-finish-load` otherwise (a reload needs a fresh channel, since a transferred port is spent). A `ChannelError` thrown by either router arrives on the other side as a real `ChannelError` with its code and fields. `receivePort` only accepts same-window messages of the agreed type that carry an actual port, which shuts out senders in other windows (an iframe, a compromised `opener`). A script already running in the same window is outside any postMessage guard's reach. `relayPort` posts the port to the window's own origin, so a page that has navigated elsewhere never receives it. `file://` pages have no addressable origin and fall back to `"*"`, and `targetOrigin` overrides both. Both take `{ signal }`: it bounds `receivePort`'s wait and stops `relayPort`'s relay.
-
-Utility processes use the same `mainPort` wire, because their ports are `MessagePortMain`-shaped too:
-
-```typescript
-// main
-const { port1, port2 } = new MessageChannelMain()
-utilityProcess.fork(indexerPath).postMessage({ type: "port" }, [port2])
-const indexer = createClient(
-  indexerContract,
-  connect(mainPort(port1), { timeoutMs: 30_000 }).transport
-)
-
-// indexer.js
-process.parentPort.on("message", (event) => {
-  connect(mainPort(event.ports[0]), { router: indexerRouter })
-})
-```
-
-The same pattern covers Web Workers, iframes, and `worker_threads` (see `examples/worker-threads`, which is `nodePort` on both ends). Only the port hand-off differs.
-
-</details>
+- [Examples](./examples) for worker threads, WebSockets, Hono, QStash, and capnweb
 
 ## License
 
