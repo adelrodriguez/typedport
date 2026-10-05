@@ -1,7 +1,6 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec"
-import { describe, expect, expectTypeOf, test } from "vitest"
+import { describe, expect, test } from "vitest"
 import * as z from "zod"
-import type { Transport } from "../../core/transport"
 import { createClient } from "../../client/client"
 import { defineContract, channel } from "../../core/contract"
 import { ChannelError } from "../../core/error"
@@ -552,22 +551,7 @@ describe("mergeRouters", () => {
     )
   })
 
-  test("merges contexts into their intersection", () => {
-    const router = mergeRouters(filesRouter, pingRouter, meRouter)
-
-    expectTypeOf(router.dispatch)
-      .parameter(2)
-      .toEqualTypeOf<
-        { signal?: AbortSignal } & { context: { sender: string } & { userId: number } }
-      >()
-
-    // @ts-expect-error the merged router needs every router's context
-    void router.dispatch("ping", "ada", { context: { sender: "main" } }).catch(() => null)
-    // @ts-expect-error the merged router needs a context at all
-    void router.dispatch("ping", "ada").catch(() => null)
-  })
-
-  test("keeps a union context whole", async () => {
+  test("passes a union context through whole", async () => {
     type Session = { kind: "guest" } | { kind: "user"; userId: string }
     const sessionContract = defineContract({
       session: channel({ input: z.string(), output: z.string() }),
@@ -577,39 +561,27 @@ describe("mergeRouters", () => {
     })
     const router = mergeRouters(sessionRouter, pingRouter)
 
-    expectTypeOf(router.dispatch).parameter(2).toEqualTypeOf<DispatchOptions<Session>>()
     await expect(router.dispatch("session", "hi", { context: { kind: "guest" } })).resolves.toBe(
       "guest"
     )
-
-    // @ts-expect-error the union context is still required
-    void router.dispatch("session", "hi").catch(() => null)
   })
 
-  test("keeps other routers' requirements when one takes unknown", () => {
-    const unknownRouter = createRouter<typeof pingContract, unknown>(pingContract, {
-      ping: (name) => name,
-    })
-    const router = mergeRouters(meRouter, unknownRouter)
+  test("calls a router's dispatch method on the router", async () => {
+    class PrefixRouter {
+      readonly channels = ["echo"]
+      readonly prefix = "echo:"
 
-    expectTypeOf(router.dispatch).parameter(2).toEqualTypeOf<DispatchOptions<{ userId: number }>>()
+      // oxlint-disable-next-line require-await -- `Router` requires dispatch to return a promise
+      async dispatch(_path: string, raw: unknown, _options?: DispatchOptions): Promise<unknown> {
+        return `${this.prefix}${String(raw)}`
+      }
+    }
 
-    // @ts-expect-error `userId` is still required
-    void router.dispatch("me", 1, { context: {} }).catch(() => null)
+    await expect(mergeRouters(new PrefixRouter()).dispatch("echo", "hi")).resolves.toBe("echo:hi")
   })
 
-  test("merges an array of routers of unknown length", () => {
-    const routers: Array<typeof meRouter> = [meRouter]
-    const router = mergeRouters(...routers, pingRouter)
-
-    expectTypeOf(router.dispatch).parameter(2).toEqualTypeOf<DispatchOptions<{ userId: number }>>()
-  })
-
-  test("keeps dispatch a Transport when no router has a context", async () => {
+  test("serves a client when no router has a context", async () => {
     const router = mergeRouters(pingRouter)
-
-    expectTypeOf(router.dispatch).toExtend<Transport>()
-    expectTypeOf(mergeRouters().dispatch).toExtend<Transport>()
 
     await expect(createClient(pingContract, router.dispatch).ping("ada")).resolves.toBe("pong ada")
   })

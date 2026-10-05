@@ -195,7 +195,8 @@ export function mergeRouters<const Routers extends readonly AnyRouter[]>(
       options?: object
     ) => Promise<unknown>
 
-    return await forward(path, raw, options)
+    // Called on its owner: a router may implement `dispatch` as a method that reads `this`.
+    return await forward.call(owner, path, raw, options)
   }
 
   return { channels: [...owners.keys()], dispatch }
