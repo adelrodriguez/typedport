@@ -48,8 +48,8 @@ Now implement it with a router. Each key is a dotted path from the contract. Hov
 
 ```typescript
 const router = createRouter(contract, {
-  "greetings.hello": ({ name }) => `Hello, ${name}!`,
-  log: (message) => {
+  "greetings.hello": ({ input: { name } }) => `Hello, ${name}!`,
+  log: ({ input: message }) => {
     console.log("server got:", message)
   },
 })

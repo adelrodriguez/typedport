@@ -48,7 +48,7 @@ function createConnectedPeers() {
   const [serverWire, clientWire] = createWirePair()
 
   const serverRouter = createRouter(pullContract, {
-    "math.add": ({ a, b }) => a + b,
+    "math.add": ({ input: { a, b } }) => a + b,
   })
   const clientRouter = createRouter(pushContract, {
     notify: () => null,
@@ -76,7 +76,7 @@ function createServingPeer(options: { onHidden?: (error: unknown) => void } = {}
     started = resolve
   })
   const router = createRouter(pullContract, {
-    "math.add": (_input, { signal }) =>
+    "math.add": ({ signal }) =>
       new Promise<number>((_resolve, reject) => {
         signals.push(signal)
         started?.()
@@ -354,7 +354,7 @@ describe("connect", () => {
     const seen: unknown[] = []
     let calls = 0
     const router = createRouter(pullContract, {
-      "math.add": ({ a, b }) => {
+      "math.add": ({ input: { a, b } }) => {
         calls += 1
         return a + b
       },
@@ -435,7 +435,7 @@ describe("connect", () => {
     const seen: string[] = []
 
     const router = createRouter<typeof pullContract, { sessionId: string }>(pullContract, {
-      "math.add": ({ a, b }, { context: session }) => {
+      "math.add": ({ input: { a, b }, context: session }) => {
         seen.push(session.sessionId)
         return a + b
       },
@@ -506,7 +506,7 @@ function throwCallbackError(): never {
 
 describe("toWire / fromWire", () => {
   const router = createRouter(pullContract, {
-    "math.add": ({ a, b }) => a + b,
+    "math.add": ({ input: { a, b } }) => a + b,
   })
 
   test("flattens success into a value fromWire unwraps", async () => {
@@ -775,7 +775,7 @@ describe("connect over a pending wire", () => {
     const [serverWire, clientWire] = createWirePair()
 
     const serverRouter = createRouter(pullContract, {
-      "math.add": ({ a, b }) => a + b,
+      "math.add": ({ input: { a, b } }) => a + b,
     })
     connect(serverWire, { router: serverRouter })
 

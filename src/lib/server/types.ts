@@ -9,27 +9,26 @@ type UnionToIntersection<U> = (U extends unknown ? (k: U) => void : never) exten
   : never
 
 /**
- * What a resolver receives besides its input. `context` is whatever the edge passed to `dispatch`
- * (the authenticated user, the sender identity). `signal` aborts when the caller gives up — the
- * edge's own signal, or a `connect` peer that cancelled or timed out — so pass it on to `fetch`, a
- * database driver, or a model call. It is always present, and never aborts when the edge gave
- * none.
+ * What a resolver receives. `input` is the parsed input (the schema's output type, after defaults
+ * and coercions). `context` is whatever the edge passed to `dispatch` (the authenticated user, the
+ * sender identity). `signal` aborts when the caller gives up — the edge's own signal, or a
+ * `connect` peer that cancelled or timed out — so pass it on to `fetch`, a database driver, or a
+ * model call. It is always present, and never aborts when the edge gave none.
  */
-export type ResolverOptions<Context> = { context: Context; signal: AbortSignal }
+export type ResolverArgs<Input, Context> = { input: Input; context: Context; signal: AbortSignal }
 
 /**
- * The resolver signature one leaf demands: parsed input (the schema's output type, after defaults
- * and coercions) and the {@link ResolverOptions}. A round-trip leaf must return something its
- * `output` schema accepts; a one-way leaf's resolver may return anything — the router discards it.
+ * The resolver signature one leaf demands: a single {@link ResolverArgs} object, destructured for
+ * whatever the resolver needs. A round-trip leaf must return something its `output` schema accepts;
+ * a one-way leaf's resolver may return anything — the router discards it.
  */
 export type Resolver<Leaf, Context> =
   Leaf extends Channel<infer Input, infer Output>
     ? Output extends StandardSchemaV1
       ? (
-          input: StandardSchemaV1.InferOutput<Input>,
-          options: ResolverOptions<Context>
+          args: ResolverArgs<StandardSchemaV1.InferOutput<Input>, Context>
         ) => MaybePromise<StandardSchemaV1.InferInput<Output>>
-      : (input: StandardSchemaV1.InferOutput<Input>, options: ResolverOptions<Context>) => unknown
+      : (args: ResolverArgs<StandardSchemaV1.InferOutput<Input>, Context>) => unknown
     : never
 
 type FlatResolvers<Tree, Context, Prefix extends string = ""> = {

@@ -12,10 +12,10 @@ import { messages, workflows } from "./contract.ts"
 import { env } from "./env.ts"
 
 const messageRouter = createRouter(messages, {
-  "email.welcome": ({ email }) => {
+  "email.welcome": ({ input: { email } }) => {
     console.log(`welcome email sent to ${email}`)
   },
-  "stripe.checkout.created": ({ amount, id }) => {
+  "stripe.checkout.created": ({ input: { amount, id } }) => {
     console.log(`checkout ${id} created for $${(amount / 100).toFixed(2)}`)
   },
 })
@@ -23,7 +23,7 @@ const messageRouter = createRouter(messages, {
 // Workflow resolvers are re-entered once per step; context.run memoizes each
 // completed step, so the body reads top to bottom like ordinary code.
 const workflowRouter = createRouter<typeof workflows, WorkflowContext>(workflows, {
-  "reports.generate": async ({ reportId }, { context }) => {
+  "reports.generate": async ({ input: { reportId }, context }) => {
     const rows = await context.run("query", () => 3)
     await context.sleep("cool-down", 1)
     await context.run("render", () => {

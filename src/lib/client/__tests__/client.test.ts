@@ -24,10 +24,10 @@ function createTestClient() {
 
   const router = createRouter(contract, {
     "localFiles.open": () => ({ contents: "hello", path: "/tmp/a.txt" }),
-    "localFiles.save": (file) => {
+    "localFiles.save": ({ input: file }) => {
       saved.push(file)
     },
-    "stripe.checkout.created": (payload) => {
+    "stripe.checkout.created": ({ input: payload }) => {
       published.push(payload)
     },
   })

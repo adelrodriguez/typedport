@@ -39,18 +39,18 @@ const filesRouter = createRouter(filesContract, {
   files: {
     read: implement(filesContract)
       .$context<Sender>()
-      .files.read((path, { context }) => `${context.sender}:${path}`),
+      .files.read(({ input: path, context }) => `${context.sender}:${path}`),
   },
 })
-const pingRouter = createRouter(pingContract, { ping: (name) => name })
+const pingRouter = createRouter(pingContract, { ping: ({ input: name }) => name })
 const meRouter = createRouter<typeof meContract, User>(meContract, {
-  me: (offset, { context }) => context.userId + offset,
+  me: ({ input: offset, context }) => context.userId + offset,
 })
 const sessionRouter = createRouter<typeof sessionContract, Session>(sessionContract, {
-  session: (_input, { context }) => context.kind,
+  session: ({ context }) => context.kind,
 })
 const unknownRouter = createRouter<typeof pingContract, unknown>(pingContract, {
-  ping: (name) => name,
+  ping: ({ input: name }) => name,
 })
 
 // ── Positive type-level tests ────────────────────────────────────────────────
@@ -147,8 +147,10 @@ type _SingleUnknown = Expect<
   const createSenderRouter = createRouter.$context<Sender>()
   const createUserRouter = createRouter.$context<User>()
   const router = mergeRouters(
-    createSenderRouter(pingContract, { ping: (name, { context }) => `${context.sender}:${name}` }),
-    createUserRouter(meContract, { me: (offset, { context }) => context.userId + offset })
+    createSenderRouter(pingContract, {
+      ping: ({ input: name, context }) => `${context.sender}:${name}`,
+    }),
+    createUserRouter(meContract, { me: ({ input: offset, context }) => context.userId + offset })
   )
 
   type _Factories = Expect<Equal<typeof router, Router<Sender & User>>>
@@ -197,10 +199,10 @@ async function _negativeTypeTests(wire: Wire): Promise<void> {
   await free.dispatch("ping", "ada", { context: { sender: "main" } })
 
   const userRouter = createRouter<typeof meContract, { kind: "user" }>(meContract, {
-    me: (offset) => offset,
+    me: ({ input: offset }) => offset,
   })
   const guestRouter = createRouter<typeof pingContract, { kind: "guest" }>(pingContract, {
-    ping: (name) => name,
+    ping: ({ input: name }) => name,
   })
   const incompatible = mergeRouters(userRouter, guestRouter)
 
@@ -225,10 +227,10 @@ async function _negativeTypeTests(wire: Wire): Promise<void> {
   await afterSpread.dispatch("me", 1, { context: { userId: 1 } })
 
   const userLiteral = createRouter<typeof pingContract, "user">(pingContract, {
-    ping: (name, { context }) => `${context}:${name}`,
+    ping: ({ input: name, context }) => `${context}:${name}`,
   })
   const guestLiteral = createRouter<typeof pingContract, "guest">(pingContract, {
-    ping: (name, { context }) => `${context}:${name}`,
+    ping: ({ input: name, context }) => `${context}:${name}`,
   })
   const literalChoice = Math.random() > 0.5 ? userLiteral : guestLiteral
   const literalRouters: Array<typeof pingRouter> = [pingRouter]

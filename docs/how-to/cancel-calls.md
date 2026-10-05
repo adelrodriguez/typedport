@@ -6,7 +6,7 @@ Cancel a call when its result is no longer needed, such as when a user leaves th
 
    ```typescript
    const router = createRouter(contract, {
-     "reports.generate": async ({ id }, { signal }) => generate(id, { signal }),
+     "reports.generate": async ({ input: { id }, signal }) => generate(id, { signal }),
    })
    ```
 

@@ -37,7 +37,7 @@ describe("implement", () => {
 describe("createRouter with a handler tree", () => {
   const tp = implement(contract).$context<Session>()
 
-  const open = tp.notes.open(({ path }, { context: session }) => ({
+  const open = tp.notes.open(({ input: { path }, context: session }) => ({
     contents: `${session.userId}:${path}`,
     path,
   }))
@@ -86,7 +86,7 @@ describe("createRouter with a handler tree", () => {
     const router = createRouter(contract, {
       notes: {
         helper: { unrelated: true },
-        open: tree.notes.open(({ path }, { context: { node } }) => ({
+        open: tree.notes.open(({ input: { path }, context: { node } }) => ({
           contents: String(node.children.length),
           path,
         })),

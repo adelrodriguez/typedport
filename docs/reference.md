@@ -50,7 +50,7 @@ Returns a router factory with the context type fixed. Each call infers its contr
 const createSessionRouter = createRouter.$context<Session>()
 
 const filesRouter = createSessionRouter(filesContract, {
-  "files.open": async (_input, { context }) => openFile(context.userId),
+  "files.open": async ({ context }) => openFile(context.userId),
   // ...
 })
 const notesRouter = createSessionRouter(notesContract, {
@@ -76,7 +76,7 @@ A channel that two routers declare throws a `SetupError` with code `duplicate-ch
 
 ### Resolvers
 
-A resolver has the signature `(input, { context, signal }) => result`. It may be synchronous or async.
+A resolver takes one object, `({ input, context, signal }) => result`, and destructures what it needs. It may be synchronous or async.
 
 `input` is the router's parsed value, with defaults and transforms applied.
 
@@ -202,7 +202,7 @@ The class of every wiring mistake. It is thrown when you build something, and it
 | `InferClient<typeof contract>`             | The client type for a contract                          |
 | `InferResolvers<typeof contract, Context>` | The flat resolver map for a contract                    |
 | `Resolver<Leaf, Context>`                  | The resolver for one leaf                               |
-| `ResolverOptions<Context>`                 | A resolver's second argument, `{ context, signal }`     |
+| `ResolverArgs<Input, Context>`             | A resolver's argument, `{ input, context, signal }`     |
 | `Router<Context>`                          | The value `createRouter` and `mergeRouters` return      |
 | `DispatchOptions<Context>`                 | The third argument of `dispatch`, `{ context, signal }` |
 | `Implementer`, `Fragment`, `FragmentTree`  | The builder, its handlers, and a tree of handlers       |

@@ -95,7 +95,7 @@ describe("schema-library agnosticism", () => {
     })
 
     const router = createRouter(custom, {
-      shout: (input) => input.toUpperCase(),
+      shout: ({ input }) => input.toUpperCase(),
     })
 
     await expect(router.dispatch("shout", "hey")).resolves.toBe("HEY")
