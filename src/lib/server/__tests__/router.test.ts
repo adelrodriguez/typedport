@@ -1,10 +1,10 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec"
-import { describe, expect, test } from "vitest"
+import { describe, expect, expectTypeOf, test } from "vitest"
 import * as z from "zod"
 import { createClient } from "../../client/client"
 import { defineContract, channel } from "../../core/contract"
 import { ChannelError } from "../../core/error"
-import { createRouter } from "../router"
+import { createRouter, type Router } from "../router"
 
 const contract = defineContract({
   math: {
@@ -190,6 +190,66 @@ describe("createRouter", () => {
     ).resolves.toBe(3)
   })
 
+  test("$context fixes the context once while inferring each contract", async () => {
+    type Session = { userId: string }
+    const createSessionRouter = createRouter.$context<Session>()
+    const session: Session = { userId: "ada" }
+    const controller = new AbortController()
+    const router = createSessionRouter(contract, {
+      "math.add": (input, { context, signal }) => {
+        expectTypeOf(input).toEqualTypeOf<{ a: number; b: number }>()
+        expectTypeOf(context).toEqualTypeOf<Session>()
+        expectTypeOf(signal).toEqualTypeOf<AbortSignal>()
+        expect(context).toBe(session)
+        expect(signal).toBe(controller.signal)
+        return input.a + input.b
+      },
+      notify: ({ message }, { context }) => {
+        expectTypeOf(message).toEqualTypeOf<string>()
+        expectTypeOf(context).toEqualTypeOf<Session>()
+        expect(context).toBe(session)
+        return "discarded"
+      },
+    })
+    const otherContract = defineContract({
+      user: { name: channel({ input: z.void(), output: z.string() }) },
+    })
+    const otherRouter = createSessionRouter(otherContract, {
+      "user.name": (input, { context }) => {
+        expectTypeOf(input).toBeVoid()
+        expectTypeOf(context).toEqualTypeOf<Session>()
+        return context.userId
+      },
+    })
+
+    expect(createSessionRouter).toBe(createRouter)
+    expectTypeOf(router).toEqualTypeOf<Router<Session>>()
+    expectTypeOf(otherRouter).toEqualTypeOf<Router<Session>>()
+    expect(router.channels.toSorted()).toEqual(["math.add", "notify"])
+    await expect(
+      router.dispatch("math.add", { a: 2 }, { context: session, signal: controller.signal })
+    ).resolves.toBe(3)
+    await expect(
+      router.dispatch("notify", { message: "hi" }, { context: session })
+    ).resolves.toBeUndefined()
+    await expect(otherRouter.dispatch("user.name", undefined, { context: session })).resolves.toBe(
+      "ada"
+    )
+  })
+
+  test("$context accepts a context type that references itself", async () => {
+    type TreeNode = { children: TreeNode[]; parent: TreeNode | null }
+    const createTreeRouter = createRouter.$context<{ node: TreeNode }>()
+    const router = createTreeRouter(contract, {
+      "math.add": ({ a, b }, { context: { node } }) => a + b + node.children.length,
+      notify: () => null,
+    })
+
+    await expect(
+      router.dispatch("math.add", { a: 1 }, { context: { node: { children: [], parent: null } } })
+    ).resolves.toBe(2)
+  })
+
   test("dispatches one-way leaves, discarding the resolver's result", async () => {
     const received: string[] = []
     const router = createRouter(contract, {
@@ -349,3 +409,40 @@ describe("createRouter", () => {
     )
   })
 })
+
+// oxlint-disable-next-line no-unused-vars -- exists to be typechecked, not run
+function typeAssertions(): void {
+  const createSessionRouter = createRouter.$context<{ userId: string }>()
+  const resolvers = {
+    "math.add": ({ a, b }: { a: number; b: number }) => a + b,
+    notify: () => null,
+  }
+  const router = createSessionRouter(contract, resolvers)
+
+  void router.dispatch("math.add", { a: 1 }, { context: { userId: "ada" } })
+  // @ts-expect-error context is required
+  void router.dispatch("math.add", { a: 1 })
+  // @ts-expect-error a signal alone does not supply the context
+  void router.dispatch("math.add", { a: 1 }, { signal: new AbortController().signal })
+  // @ts-expect-error the dispatch context must match the fixed type
+  void router.dispatch("math.add", { a: 1 }, { context: { userId: 1 } })
+  // @ts-expect-error missing resolver for "notify"
+  void createSessionRouter(contract, { "math.add": resolvers["math.add"] })
+  // @ts-expect-error a round-trip resolver must return the output schema's input type
+  void createSessionRouter(contract, { ...resolvers, "math.add": () => "wrong" })
+  // @ts-expect-error the resolver input must match the parsed schema type
+  void createSessionRouter(contract, { ...resolvers, "math.add": (input: string) => input.length })
+
+  // oxlint-disable-next-line no-invalid-void-type -- void is the no-context sentinel
+  const createNoContextRouter = createRouter.$context<void>()
+  const noContextRouter = createNoContextRouter(contract, {
+    "math.add": ({ a, b }, { context }) => {
+      expectTypeOf(context).toBeVoid()
+      return a + b
+    },
+    notify: () => null,
+  })
+  expectTypeOf(noContextRouter).toEqualTypeOf<Router>()
+  void noContextRouter.dispatch("math.add", { a: 1 })
+  void noContextRouter.dispatch("math.add", { a: 1 }, { signal: new AbortController().signal })
+}

@@ -56,9 +56,10 @@ export type Router<Context = void> = {
  *   })`). A missing leaf is a missing property, a fragment in the wrong slot is a path-brand
  *   mismatch, and the context type is inferred from the fragments — it is only ever written at
  *   `implement(contract).$context<Session>()`.
- * - A **flat map** keyed by dotted path — the right tool at small sizes. Declare a context type
- *   explicitly when the edge supplies one: `createRouter<typeof contract, Session>(contract,
- *   resolvers)`.
+ * - A **flat map** keyed by dotted path — the right tool at small sizes. Fix the context once with
+ *   `const createSessionRouter = createRouter.$context<Session>()`, then let each call infer its
+ *   contract: `createSessionRouter(contract, resolvers)`. The explicit `createRouter<typeof
+ *   contract, Session>(contract, resolvers)` form also works.
  */
 type CreateRouter = {
   <Tree extends ContractTree, Handlers extends object>(
@@ -69,6 +70,24 @@ type CreateRouter = {
     contract: Tree,
     resolvers: InferResolvers<Tree, Context>
   ): Router<Context>
+  /**
+   * Returns the same factory with a fixed context type, reusable across contracts. Accepts either
+   * resolver shape; handler fragments must accept this context. No context value is bound here —
+   * the edge still supplies it to `dispatch`.
+   */
+  $context: <Context>() => CreateRouterWithContext<Context>
+}
+
+type CreateRouterWithContext<Context> = {
+  // oxlint-disable-next-line no-unnecessary-type-parameters -- preserves extra exports in handler branches, including object literals
+  <Tree extends ContractTree, Handlers extends object>(
+    contract: Tree,
+    handlers: Handlers & FragmentTree<Tree, Context>
+  ): Router<Context>
+  <Tree extends ContractTree>(
+    contract: Tree,
+    resolvers: InferResolvers<Tree, Context>
+  ): Router<Context>
 }
 
 // Typed as a callable interface, not overload declarations: checking the implementation against
@@ -76,7 +95,10 @@ type CreateRouter = {
 // signature recurses without terminating (TS2589). Concrete contracts are finite, so call sites
 // are unaffected; the cast stands in for the compatibility check.
 // oxlint-disable-next-line typescript/consistent-type-assertions -- see above
-export const createRouter = buildRouter as CreateRouter
+export const createRouter: CreateRouter = Object.assign(buildRouter as CreateRouter, {
+  // Context exists only in the type system; at runtime the factory is unchanged.
+  $context: () => createRouter,
+})
 
 type AnyResolver = (input: unknown, options: { context: unknown; signal: AbortSignal }) => unknown
 

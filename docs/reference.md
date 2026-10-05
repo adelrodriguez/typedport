@@ -37,10 +37,30 @@ Returns `tree` unchanged. Branches are plain objects, and leaves are channels. T
 
 Returns a `Router`. `resolvers` takes one of two shapes:
 
-- A flat map from dotted path to resolver. The context type defaults to `void`. Pass it as a type argument to change it: `createRouter<typeof contract, Session>(contract, resolvers)`.
+- A flat map from dotted path to resolver. The context type defaults to `void`. Use `createRouter.$context<Session>()` to fix it while inferring the contract, or pass both type arguments: `createRouter<typeof contract, Session>(contract, resolvers)`.
 - A tree of handlers from `implement()` with the same shape as the contract. The context type comes from the handlers. Keys that aren't in the contract are ignored.
 
 A missing resolver is a compile error. At runtime it throws a `SetupError` with code `missing-resolver`.
+
+### `createRouter.$context<Context>()`
+
+Returns a router factory with the context type fixed. Each call infers its contract, so one edge can reuse the factory across feature contracts without repeating `typeof contract`:
+
+```typescript
+const createSessionRouter = createRouter.$context<Session>()
+
+const filesRouter = createSessionRouter(filesContract, {
+  "files.open": async (_input, { context }) => openFile(context.userId),
+  // ...
+})
+const notesRouter = createSessionRouter(notesContract, {
+  // ...
+})
+```
+
+The factory accepts both flat resolver maps and handler trees from `implement()`. Handler fragments must accept the fixed context type. Missing leaves, misplaced fragments, and resolver input/output types are checked as with `createRouter`.
+
+This is a type-level operation, not a bound context value. `dispatch` still requires `{ context }` when the fixed type isn't `void`. The original `createRouter` keeps its default `void` context and handler-tree inference.
 
 ### Resolvers
 
