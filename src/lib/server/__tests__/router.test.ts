@@ -176,6 +176,20 @@ describe("createRouter", () => {
     expect(seen).toEqual(["ada", "grace"])
   })
 
+  test("accepts a context type that references itself", async () => {
+    // Electron's `WebContents` is one such type (`hostWebContents: WebContents`).
+    type TreeNode = { children: TreeNode[]; parent: TreeNode | null }
+    const root: TreeNode = { children: [], parent: null }
+    const router = createRouter<typeof contract, { node: TreeNode }>(contract, {
+      "math.add": ({ a, b }, { context: { node } }) => a + b + node.children.length,
+      notify: () => null,
+    })
+
+    await expect(
+      router.dispatch("math.add", { a: 1, b: 2 }, { context: { node: root } })
+    ).resolves.toBe(3)
+  })
+
   test("dispatches one-way leaves, discarding the resolver's result", async () => {
     const received: string[] = []
     const router = createRouter(contract, {

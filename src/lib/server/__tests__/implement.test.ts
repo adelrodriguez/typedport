@@ -68,6 +68,30 @@ describe("createRouter with a handler tree", () => {
     ).resolves.toEqual({ contents: "u1:/a.md", path: "/a.md" })
   })
 
+  test("accepts a context type that references itself", async () => {
+    type TreeNode = { children: TreeNode[]; parent: TreeNode | null }
+    const tree = implement(contract).$context<{ node: TreeNode }>()
+    const router = createRouter(contract, {
+      notes: {
+        helper: { unrelated: true },
+        open: tree.notes.open(({ path }, { context: { node } }) => ({
+          contents: String(node.children.length),
+          path,
+        })),
+        save: tree.notes.save(() => null),
+      },
+      ping: tree.ping(() => null),
+    })
+
+    await expect(
+      router.dispatch(
+        "notes.open",
+        { path: "/a.md" },
+        { context: { node: { children: [], parent: null } } }
+      )
+    ).resolves.toEqual({ contents: "0", path: "/a.md" })
+  })
+
   // The casts below fabricate what the type system prevents, to prove the runtime guards hold.
   type Handlers = FragmentTree<typeof contract, Session>
 
