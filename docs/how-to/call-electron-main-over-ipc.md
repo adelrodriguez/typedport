@@ -19,6 +19,8 @@ This guide serves a contract from the main process with `ipcMain.handle` and cal
    }
    ```
 
+   If each feature has its own router, merge them first with `mergeRouters(filesRouter, settingsRouter)` and run the same loop over the result. See [How to split handlers across files](./split-handlers-across-files.md#serve-several-routers-as-one).
+
 2. In the preload, expose only the transport function. The client is a Proxy, and `contextBridge` can't pass a Proxy because it structured-clones what it exposes.
 
    ```typescript

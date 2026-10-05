@@ -20,5 +20,5 @@ export {
   type FragmentTree,
   type Implementer,
 } from "./lib/server/implement"
-export { createRouter, type DispatchOptions, type Router } from "./lib/server/router"
+export { createRouter, type DispatchOptions, mergeRouters, type Router } from "./lib/server/router"
 export type { InferResolvers, Resolver, ResolverOptions } from "./lib/server/types"

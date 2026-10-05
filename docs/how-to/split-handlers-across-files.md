@@ -68,3 +68,20 @@ Reuse `createSessionRouter` for every contract served by the same edge. It also 
 The explicit `createRouter<typeof contract, Session>(contract, resolvers)` form still works.
 
 To declare the map away from the `createRouter` call, type it with `InferResolvers<typeof contract, Session>`.
+
+## Serve several routers as one
+
+If each feature has its own contract and router, merge them with `mergeRouters` and give the edge the result:
+
+```typescript
+// router.ts
+import { mergeRouters } from "typedport"
+import { filesRouter } from "./files/router"
+import { settingsRouter } from "./settings/router"
+
+export const router = mergeRouters(filesRouter, settingsRouter)
+```
+
+The merged router needs every context its routers declare. If `filesRouter` needs `{ sender }` and `settingsRouter` needs `{ userId }`, `router.dispatch` needs `{ context: { sender, userId } }`, and each resolver still receives the whole object.
+
+If two routers declare the same channel, `mergeRouters` throws a `SetupError` with code `duplicate-channel` that names the path.

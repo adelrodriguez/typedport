@@ -10,4 +10,10 @@ export default defineConfig({
     typeAware: true,
     typeCheck: true,
   },
+  overrides: [
+    {
+      files: ["src/__tests__/types.test-d.ts"],
+      rules: { "typescript/no-unnecessary-type-parameters": "off" },
+    },
+  ],
 })

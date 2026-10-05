@@ -4,7 +4,9 @@ import * as z from "zod"
 import { createClient } from "../../client/client"
 import { defineContract, channel } from "../../core/contract"
 import { ChannelError } from "../../core/error"
-import { createRouter, type Router } from "../router"
+import { SetupError } from "../../core/setup-error"
+import { implement } from "../implement"
+import { createRouter, type DispatchOptions, mergeRouters, type Router } from "../router"
 
 const contract = defineContract({
   math: {
@@ -446,3 +448,156 @@ function typeAssertions(): void {
   void noContextRouter.dispatch("math.add", { a: 1 })
   void noContextRouter.dispatch("math.add", { a: 1 }, { signal: new AbortController().signal })
 }
+
+describe("mergeRouters", () => {
+  const filesContract = defineContract({
+    files: { read: channel({ input: z.string(), output: z.string() }) },
+  })
+  const pingContract = defineContract({ ping: channel({ input: z.string(), output: z.string() }) })
+  const meContract = defineContract({ me: channel({ input: z.number(), output: z.number() }) })
+
+  // One router per context shape: a handler tree, a context-free map, and a map with a context.
+  const filesRouter = createRouter(filesContract, {
+    files: {
+      read: implement(filesContract)
+        .$context<{ sender: string }>()
+        .files.read((path, { context }) => `${context.sender}:${path}`),
+    },
+  })
+  const pingRouter = createRouter(pingContract, { ping: (name) => `pong ${name}` })
+  const meRouter = createRouter<typeof meContract, { userId: number }>(meContract, {
+    me: (offset, { context }) => context.userId + offset,
+  })
+
+  test("lists every router's channels", () => {
+    const router = mergeRouters(filesRouter, pingRouter, meRouter)
+
+    expect(router.channels.toSorted()).toEqual(["files.read", "me", "ping"])
+  })
+
+  test("dispatches to the router that owns the path, passing the context through", async () => {
+    const router = mergeRouters(filesRouter, pingRouter, meRouter)
+    const context = { sender: "main", userId: 7 }
+
+    await expect(router.dispatch("files.read", "a.txt", { context })).resolves.toBe("main:a.txt")
+    await expect(router.dispatch("ping", "ada", { context })).resolves.toBe("pong ada")
+    await expect(router.dispatch("me", 1, { context })).resolves.toBe(8)
+  })
+
+  test("leaves parsing to the owning router", async () => {
+    const router = mergeRouters(filesRouter, pingRouter)
+
+    await expect(
+      router.dispatch("files.read", 42, { context: { sender: "main" } })
+    ).rejects.toMatchObject({ code: "validation" })
+  })
+
+  test("throws duplicate-channel when two routers declare the same path", () => {
+    const other = createRouter(pingContract, { ping: (name) => name })
+
+    expect(() => mergeRouters(pingRouter, other)).toThrow(
+      expect.objectContaining({ code: "duplicate-channel", path: "ping" })
+    )
+    expect(() => mergeRouters(pingRouter, other)).toThrow(SetupError)
+  })
+
+  test("rejects paths no router owns, prototype members included", async () => {
+    const router = mergeRouters(pingRouter)
+
+    for (const path of ["missing", "constructor", "__proto__"]) {
+      // oxlint-disable-next-line no-await-in-loop -- each rejection is asserted in turn
+      await expect(router.dispatch(path, null)).rejects.toMatchObject({
+        code: "unknown-channel",
+        path,
+      })
+    }
+
+    await expect(router.dispatch("missing", null)).rejects.toBeInstanceOf(ChannelError)
+  })
+
+  test("rejects with an aborted signal's reason before looking up the path", async () => {
+    const router = mergeRouters(pingRouter)
+    const reason = new Error("gave up")
+
+    await expect(
+      router.dispatch("missing", null, { signal: AbortSignal.abort(reason) })
+    ).rejects.toBe(reason)
+  })
+
+  test("passes the signal to the owning router", async () => {
+    const seen: AbortSignal[] = []
+    const watching = createRouter(pingContract, {
+      ping: (name, { signal }) => {
+        seen.push(signal)
+        return name
+      },
+    })
+    const controller = new AbortController()
+
+    await mergeRouters(watching).dispatch("ping", "ada", { signal: controller.signal })
+
+    expect(seen).toEqual([controller.signal])
+  })
+
+  test("nests", async () => {
+    const router = mergeRouters(mergeRouters(filesRouter, pingRouter), meRouter)
+
+    expect(router.channels.toSorted()).toEqual(["files.read", "me", "ping"])
+    await expect(
+      router.dispatch("me", 1, { context: { sender: "main", userId: 3 } })
+    ).resolves.toBe(4)
+    expect(() => mergeRouters(mergeRouters(pingRouter), pingRouter)).toThrow(
+      expect.objectContaining({ code: "duplicate-channel" })
+    )
+  })
+
+  test("passes the call's context to context-free routers too", async () => {
+    const seen: unknown[] = []
+    const freeRouter = createRouter(pingContract, {
+      ping: (name, { context }) => {
+        seen.push(context)
+        return name
+      },
+    })
+    const router = mergeRouters(freeRouter, meRouter)
+
+    await router.dispatch("ping", "ada", { context: { userId: 7 } })
+
+    expect(seen).toEqual([{ userId: 7 }])
+  })
+
+  test("passes a union context through whole", async () => {
+    type Session = { kind: "guest" } | { kind: "user"; userId: string }
+    const sessionContract = defineContract({
+      session: channel({ input: z.string(), output: z.string() }),
+    })
+    const sessionRouter = createRouter<typeof sessionContract, Session>(sessionContract, {
+      session: (_input, { context }) => context.kind,
+    })
+    const router = mergeRouters(sessionRouter, pingRouter)
+
+    await expect(router.dispatch("session", "hi", { context: { kind: "guest" } })).resolves.toBe(
+      "guest"
+    )
+  })
+
+  test("calls a router's dispatch method on the router", async () => {
+    class PrefixRouter {
+      readonly channels = ["echo"]
+      readonly prefix = "echo:"
+
+      // oxlint-disable-next-line require-await -- `Router` requires dispatch to return a promise
+      async dispatch(_path: string, raw: unknown, _options?: DispatchOptions): Promise<unknown> {
+        return `${this.prefix}${String(raw)}`
+      }
+    }
+
+    await expect(mergeRouters(new PrefixRouter()).dispatch("echo", "hi")).resolves.toBe("echo:hi")
+  })
+
+  test("serves a client when no router has a context", async () => {
+    const router = mergeRouters(pingRouter)
+
+    await expect(createClient(pingContract, router.dispatch).ping("ada")).resolves.toBe("pong ada")
+  })
+})

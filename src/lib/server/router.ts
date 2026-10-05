@@ -100,6 +100,149 @@ export const createRouter: CreateRouter = Object.assign(buildRouter as CreateRou
   $context: () => createRouter,
 })
 
+// Any router at all. `Router<any>` would not do: `[any] extends [void]` picks the no-context
+// `dispatch`, which a router with a context is not assignable to.
+type AnyRouter = {
+  channels: readonly string[]
+  dispatch: (path: string, raw: unknown, ...options: never[]) => Promise<unknown>
+}
+
+type ContextOf<R> = R extends Router<infer Context> ? Context : never
+
+// A router's required context as a parameter type, or nothing when it is context-free.
+// Distributes over a union-typed argument (`Router<A> | Router<B>`), one function per router, so a
+// union context stays whole.
+type ContextParameter<R> = R extends AnyRouter
+  ? // oxlint-disable-next-line no-invalid-void-type -- void is the no-context sentinel, as in `DispatchOptions`
+    [ContextOf<R>] extends [void]
+    ? never
+    : (context: ContextOf<R>) => void
+  : never
+
+// What one argument requires: inferring from a union of parameters intersects them, because either
+// router of a union-typed argument may be the one that runs. `unknown` when nothing is required,
+// so it drops out of the fold's intersection.
+type ArgumentContext<R> = [ContextParameter<R>] extends [never]
+  ? unknown
+  : ContextParameter<R> extends (context: infer Context) => void
+    ? Context
+    : never
+
+type RequiresContext<R> = [ContextParameter<R>] extends [never] ? false : true
+
+/**
+ * Folds every argument's context into `Merged`, tracking in `Required` whether any argument needs
+ * one. Walks a tuple from both ends so a variadic tuple (`[...routers, extra]`) keeps its fixed
+ * elements apart; an array of unknown length contributes its element type once.
+ */
+type FoldContexts<
+  Routers extends readonly AnyRouter[],
+  Merged,
+  Required extends boolean,
+> = Routers extends readonly [infer Head, ...infer Tail extends readonly AnyRouter[]]
+  ? FoldContexts<
+      Tail,
+      Merged & ArgumentContext<Head>,
+      Required extends true ? true : RequiresContext<Head>
+    >
+  : Routers extends readonly [...infer Init extends readonly AnyRouter[], infer Last]
+    ? FoldContexts<
+        Init,
+        Merged & ArgumentContext<Last>,
+        Required extends true ? true : RequiresContext<Last>
+      >
+    : Routers extends readonly []
+      ? FinishContext<Merged, Required>
+      : FinishContext<
+          Merged & ArgumentContext<Routers[number]>,
+          Required extends true ? true : RequiresContext<Routers[number]>
+        >
+
+// Stands in for contexts no value satisfies at once (`{ kind: "user" }` and `{ kind: "guest" }`,
+// or the literals `"user"` and `"guest"`). Their intersection is `never`, which `Router` reads as
+// "no context", so it would make `dispatch` callable with none. This keeps a context required but
+// impossible to build, and its key is what the compiler error shows.
+type IncompatibleContexts = { "the merged routers' contexts are incompatible": never }
+
+// The flag, not the merged type, decides whether a context is required: an impossible
+// intersection and "nothing required" must not look alike.
+type FinishContext<Merged, Required extends boolean> = Required extends true
+  ? [Merged] extends [never]
+    ? IncompatibleContexts
+    : Merged
+  : // oxlint-disable-next-line no-invalid-void-type -- void is the no-context sentinel, as in `DispatchOptions`
+    void
+
+/**
+ * The context of a merged router: the intersection of the routers' contexts, or `void` when none
+ * has one. Contexts are intersected whole, never by intersecting a union of them, which would also
+ * intersect the members of a union context (`{ kind: "guest" } | { kind: "user" }` would collapse
+ * to `never`) and let an `unknown` context absorb the others. The `void` fallback keeps `dispatch`
+ * a `Transport` when nothing is required.
+ */
+type MergedContext<Routers extends readonly AnyRouter[]> = FoldContexts<Routers, unknown, false>
+
+/**
+ * Serves several routers as one, so an edge that takes a single router (an IPC loop, `connect`,
+ * `createClient` in tests) can serve an app split into one router per feature. `channels` lists
+ * every router's channels, and `dispatch` hands the call, `context` and `signal` included, to the
+ * router that owns the path, which parses as it always does.
+ *
+ * Two routers declaring the same channel throw a `SetupError` with code `duplicate-channel` here,
+ * before any edge registers anything. The merged context is the intersection of the routers'
+ * contexts: routers needing `{ sender }` and `{ userId }` merge into one needing both, and each
+ * resolver still receives the whole object. Context-free routers add nothing, so merging only those
+ * keeps `dispatch` a valid `Transport`. The result is a `Router`, so merges nest.
+ *
+ * Whether a router takes a context exists only in its type, so every owner receives the context the
+ * call carried: a context-free router merged beside one that needs `{ sender }` sees `{ sender }`
+ * at runtime, though its resolvers are typed `void`.
+ */
+export function mergeRouters<const Routers extends readonly AnyRouter[]>(
+  ...routers: Routers
+): Router<MergedContext<Routers>> {
+  // A Map, not an object: an untrusted path such as "constructor" must miss, not resolve to an
+  // `Object.prototype` member.
+  const owners = new Map<string, AnyRouter>()
+
+  for (const router of routers) {
+    for (const channel of router.channels) {
+      if (owners.has(channel)) {
+        throw new SetupError({ code: "duplicate-channel", path: channel })
+      }
+
+      owners.set(channel, router)
+    }
+  }
+
+  const dispatch = async (
+    path: string,
+    raw: unknown,
+    options?: { context?: unknown; signal?: AbortSignal }
+  ): Promise<unknown> => {
+    const owner = owners.get(path)
+
+    // Same order as a single router: a caller that already gave up hears its own reason.
+    options?.signal?.throwIfAborted()
+
+    if (!owner) {
+      throw new ChannelError({ code: "unknown-channel", path })
+    }
+
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- the owner accepts the slice of the merged context it declared, and the intersection carries every slice
+    const forward = owner.dispatch as (
+      path: string,
+      raw: unknown,
+      options?: object
+    ) => Promise<unknown>
+
+    // Called on its owner: a router may implement `dispatch` as a method that reads `this`.
+    return await forward.call(owner, path, raw, options)
+  }
+
+  return { channels: [...owners.keys()], dispatch }
+}
+
 type AnyResolver = (input: unknown, options: { context: unknown; signal: AbortSignal }) => unknown
 
 function buildRouter(contract: ContractTree, resolvers: object): Router<never> {
