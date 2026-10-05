@@ -1,8 +1,8 @@
-import { describe, expect, test } from "vitest"
+import { describe, expect, expectTypeOf, test } from "vitest"
 import * as z from "zod"
 import { defineContract, channel } from "../../core/contract"
 import { implement, isFragment, type FragmentTree } from "../implement"
-import { createRouter } from "../router"
+import { createRouter, type Router } from "../router"
 
 const contract = defineContract({
   notes: {
@@ -63,6 +63,18 @@ describe("createRouter with a handler tree", () => {
     const branch = { helper: { unrelated: true }, open, save }
     const router = createRouter(contract, { notes: branch, ping })
 
+    await expect(
+      router.dispatch("notes.open", { path: "/a.md" }, { context: { userId: "u1" } })
+    ).resolves.toEqual({ contents: "u1:/a.md", path: "/a.md" })
+  })
+
+  test("$context accepts a compatible handler tree and ignores extra exports", async () => {
+    const createSessionRouter = createRouter.$context<Session>()
+    const notes = { helper: { unrelated: true }, open, save }
+    const router = createSessionRouter(contract, { notes, ping })
+
+    expectTypeOf(router).toEqualTypeOf<Router<Session>>()
+    expect(router.channels.toSorted()).toEqual(["notes.open", "notes.save", "ping"])
     await expect(
       router.dispatch("notes.open", { path: "/a.md" }, { context: { userId: "u1" } })
     ).resolves.toEqual({ contents: "u1:/a.md", path: "/a.md" })
@@ -141,4 +153,24 @@ function typeAssertions(): void {
   const noContext = implement(contract).ping(() => null)
   // @ts-expect-error fragment contexts must agree
   void createRouter(contract, { notes, ping: noContext })
+
+  const createSessionRouter = createRouter.$context<Session>()
+  const fixedRouter = createSessionRouter(contract, { notes, ping })
+  void fixedRouter.dispatch("notes.open", { path: "x" }, { context: { userId: "u" } })
+  // @ts-expect-error context is required for handler trees too
+  void fixedRouter.dispatch("notes.open", { path: "x" })
+  // @ts-expect-error missing handler for "ping"
+  void createSessionRouter(contract, { notes })
+  // @ts-expect-error the `save` fragment cannot occupy the `open` slot
+  void createSessionRouter(contract, { notes: { open: save, save }, ping })
+  // @ts-expect-error a fragment from another contract cannot occupy a slot
+  void createSessionRouter(contract, { notes, ping: foreign })
+  // @ts-expect-error a void-context fragment cannot accept Session
+  void createSessionRouter(contract, { notes, ping: noContext })
+
+  const otherContext = implement(contract)
+    .$context<{ role: string }>()
+    .ping(() => null)
+  // @ts-expect-error the factory's fixed context cannot satisfy this fragment
+  void createSessionRouter(contract, { notes, ping: otherContext })
 }

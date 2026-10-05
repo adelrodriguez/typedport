@@ -52,13 +52,19 @@ Other exports in a handler module, such as helpers, are ignored. The router walk
 
 ## Keep a flat map with a context
 
-If you prefer the flat map, pass the context type to `createRouter` explicitly:
+If you prefer the flat map, fix the context type once and let the contract be inferred:
 
 ```typescript
-const router = createRouter<typeof contract, Session>(contract, {
+const createSessionRouter = createRouter.$context<Session>()
+
+const router = createSessionRouter(contract, {
   "files.open": async (_input, { context }) => openFile(context.userId),
   // ...
 })
 ```
+
+Reuse `createSessionRouter` for every contract served by the same edge. It also accepts handler trees whose fragments accept `Session`. Each router's `dispatch` still requires `{ context: Session }`.
+
+The explicit `createRouter<typeof contract, Session>(contract, resolvers)` form still works.
 
 To declare the map away from the `createRouter` call, type it with `InferResolvers<typeof contract, Session>`.
