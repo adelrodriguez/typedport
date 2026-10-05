@@ -1,5 +1,5 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec"
-import { describe, expect, test } from "vitest"
+import { describe, expect, expectTypeOf, test } from "vitest"
 import * as z from "zod"
 import { createClient } from "../../client/client"
 import { defineContract, channel } from "../../core/contract"

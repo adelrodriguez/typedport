@@ -142,6 +142,18 @@ type _SingleUnknown = Expect<
   type _Trailing = Expect<Equal<typeof trailing, Router<Sender & User>>>
 }
 
+// mergeRouters merges routers built with a context-fixed `createRouter.$context` factory.
+{
+  const createSenderRouter = createRouter.$context<Sender>()
+  const createUserRouter = createRouter.$context<User>()
+  const router = mergeRouters(
+    createSenderRouter(pingContract, { ping: (name, { context }) => `${context.sender}:${name}` }),
+    createUserRouter(meContract, { me: (offset, { context }) => context.userId + offset })
+  )
+
+  type _Factories = Expect<Equal<typeof router, Router<Sender & User>>>
+}
+
 // mergeRouters serves through connect with the merged context.
 {
   const wire: Wire = { onMessage: () => () => null, send: () => null }
