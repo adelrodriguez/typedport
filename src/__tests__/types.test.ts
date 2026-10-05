@@ -125,6 +125,18 @@ describe("mergeRouters", () => {
     type _Union = Expect<Equal<typeof union, Router<User & Sender>>>
   })
 
+  test("needs every member's context for a union-typed router argument", () => {
+    const either = Math.random() > 0.5 ? filesRouter : meRouter
+    const routers: Array<typeof pingRouter> = [pingRouter]
+    const alone = mergeRouters(either)
+    const leading = mergeRouters(either, ...routers)
+    const trailing = mergeRouters(...routers, either)
+
+    type _Alone = Expect<Equal<typeof alone, Router<Sender & User>>>
+    type _Leading = Expect<Equal<typeof leading, Router<Sender & User>>>
+    type _Trailing = Expect<Equal<typeof trailing, Router<Sender & User>>>
+  })
+
   test("serves through connect with the merged context", () => {
     const wire: Wire = { onMessage: () => () => null, send: () => null }
     const router = mergeRouters(filesRouter, meRouter)
@@ -166,6 +178,34 @@ async function _negativeTypeTests(wire: Wire): Promise<void> {
 
   // @ts-expect-error -- a context-free merged router takes no context
   await free.dispatch("ping", "ada", { context: { sender: "main" } })
+
+  const userRouter = createRouter<typeof meContract, { kind: "user" }>(meContract, {
+    me: (offset) => offset,
+  })
+  const guestRouter = createRouter<typeof pingContract, { kind: "guest" }>(pingContract, {
+    ping: (name) => name,
+  })
+  const incompatible = mergeRouters(userRouter, guestRouter)
+
+  // @ts-expect-error -- incompatible contexts must not make dispatch context-free
+  await incompatible.dispatch("me", 1)
+
+  // @ts-expect-error -- no context satisfies both `{ kind: "user" }` and `{ kind: "guest" }`
+  await incompatible.dispatch("me", 1, { context: { kind: "user" } })
+
+  // @ts-expect-error -- incompatible contexts do not make a Transport
+  const _incompatibleTransport: Transport = incompatible.dispatch
+
+  const either = Math.random() > 0.5 ? filesRouter : meRouter
+  const fromUnion = mergeRouters(either)
+  const routers: Array<typeof pingRouter> = [pingRouter]
+  const afterSpread = mergeRouters(...routers, either)
+
+  // @ts-expect-error -- a union-typed router argument needs a context for every member
+  await fromUnion.dispatch("me", 1, { context: { sender: "main" } })
+
+  // @ts-expect-error -- the same holds for a fixed argument after a spread
+  await afterSpread.dispatch("me", 1, { context: { userId: 1 } })
 
   // @ts-expect-error -- a router that needs a context is not a Transport
   const _transport: Transport = merged.dispatch

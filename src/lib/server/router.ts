@@ -120,17 +120,24 @@ type BoxedContext<R> = R extends AnyRouter
 
 // Every router's boxed context, intersected. Walks a tuple from both ends so a variadic tuple
 // (`[...routers, extra]`) keeps its fixed elements apart; an array of unknown length contributes
-// its element type once.
+// its element type once. A union-typed element (`Router<A> | Router<B>`) boxes to a union, which
+// is intersected too: either router may be the one that runs.
 type MergedBox<Routers extends readonly AnyRouter[]> = Routers extends readonly [
   infer Head,
   ...infer Tail extends readonly AnyRouter[],
 ]
-  ? BoxOrNothing<BoxedContext<Head>> & MergedBox<Tail>
+  ? BoxOrNothing<UnionToIntersection<BoxedContext<Head>>> & MergedBox<Tail>
   : Routers extends readonly [...infer Init extends readonly AnyRouter[], infer Last]
-    ? MergedBox<Init> & BoxOrNothing<BoxedContext<Last>>
+    ? MergedBox<Init> & BoxOrNothing<UnionToIntersection<BoxedContext<Last>>>
     : BoxOrNothing<UnionToIntersection<BoxedContext<Routers[number]>>>
 
 type BoxOrNothing<Box> = [Box] extends [never] ? unknown : Box
+
+// Stands in for contexts no value satisfies at once (`{ kind: "user" }` and `{ kind: "guest" }`).
+// Their intersection is `never`, which `Router` reads as "no context", so it would make `dispatch`
+// callable with none. This keeps a context required but impossible to build, and its key is what
+// the compiler error shows.
+type IncompatibleContexts = { "the merged routers' contexts are incompatible": never }
 
 /**
  * The context of a merged router: the intersection of the routers' contexts, or `void` when none
@@ -141,7 +148,9 @@ type BoxOrNothing<Box> = [Box] extends [never] ? unknown : Box
  */
 type MergedContext<Routers extends readonly AnyRouter[]> =
   MergedBox<Routers> extends { context: infer Context }
-    ? Context
+    ? [Context] extends [never]
+      ? IncompatibleContexts
+      : Context
     : // oxlint-disable-next-line no-invalid-void-type -- void is the no-context sentinel, as in `DispatchOptions`
       void
 
