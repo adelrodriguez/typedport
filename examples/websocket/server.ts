@@ -9,7 +9,7 @@ import { webSocket } from "../../src/wire/web-socket.ts"
 import { contract, pushContract } from "./contract.ts"
 
 const router = createRouter(contract, {
-  "math.add": ({ a, b }) => a + b,
+  "math.add": ({ input: { a, b } }) => a + b,
 })
 
 const clients = new Set<InferClient<typeof pushContract>>()

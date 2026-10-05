@@ -8,7 +8,7 @@ import { webSocket, whenOpen } from "../../src/wire/web-socket.ts"
 import { contract, pushContract } from "./contract.ts"
 
 const pushRouter = createRouter(pushContract, {
-  "ticker.tick": ({ count }) => {
+  "ticker.tick": ({ input: { count } }) => {
     console.log(`tick ${count}`)
   },
 })

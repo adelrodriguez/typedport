@@ -1,5 +1,5 @@
 import type { Join } from "../core/types"
-import type { Resolver, ResolverOptions } from "./types"
+import type { Resolver, ResolverArgs } from "./types"
 import { type Channel, type ContractTree, isChannel, joinPath } from "../core/contract"
 import { isRecord } from "../core/guards"
 import { SetupError } from "../core/setup-error"
@@ -14,7 +14,7 @@ import { SetupError } from "../core/setup-error"
 export type Fragment<Path extends string = string, Context = never> = {
   _kind: "fragment"
   $path: Path
-  $resolver: (input: never, options: ResolverOptions<Context>) => unknown
+  $resolver: (args: ResolverArgs<never, Context>) => unknown
 }
 
 /**

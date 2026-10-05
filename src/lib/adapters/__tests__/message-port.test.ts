@@ -92,7 +92,7 @@ describe("mainPort / domPort", () => {
     const { main, dom } = createPortPair()
 
     const router = createRouter(contract, {
-      "math.add": ({ a, b }) => a + b,
+      "math.add": ({ input: { a, b } }) => a + b,
     })
     connect(mainPort(main), { router })
 

@@ -12,16 +12,16 @@ import { contract, type Todo } from "./contract.ts"
 const todos = new Map<string, z.infer<typeof Todo>>()
 
 const router = createRouter(contract, {
-  "telemetry.pageView": ({ route }) => {
+  "telemetry.pageView": ({ input: { route } }) => {
     console.log(`pageview: ${route}`)
   },
-  "todos.create": ({ title }) => {
+  "todos.create": ({ input: { title } }) => {
     const todo = { done: false, id: crypto.randomUUID(), title }
     todos.set(todo.id, todo)
     return todo
   },
   "todos.list": () => [...todos.values()],
-  "todos.toggle": ({ id }) => {
+  "todos.toggle": ({ input: { id } }) => {
     const todo = todos.get(id)
 
     if (!todo) {

@@ -28,10 +28,12 @@ const tp = implement(contract)
 
 const router = createRouter(contract, {
   notes: {
-    list: tp.notes.list(({ limit, tag }) => Array.from({ length: limit }, (_, i) => `${tag}-${i}`)),
+    list: tp.notes.list(({ input: { limit, tag } }) =>
+      Array.from({ length: limit }, (_, i) => `${tag}-${i}`)
+    ),
     save: tp.notes.save(() => null),
   },
-  parse: tp.parse((value) => value * 2),
+  parse: tp.parse(({ input: value }) => value * 2),
 })
 
 describe("valibot schemas", () => {
@@ -42,11 +44,11 @@ describe("valibot schemas", () => {
     expectTypeOf(client.notes.list).returns.resolves.toEqualTypeOf<string[]>()
     expectTypeOf(client.parse).parameter(0).toEqualTypeOf<string>()
 
-    tp.notes.list((input) => {
+    tp.notes.list(({ input }) => {
       expectTypeOf(input).toEqualTypeOf<{ limit: number; tag: string }>()
       return []
     })
-    tp.parse((input) => {
+    tp.parse(({ input }) => {
       expectTypeOf(input).toEqualTypeOf<number>()
       return input
     })
@@ -79,7 +81,7 @@ describe("valibot schemas", () => {
         list: tp.notes.list(() => [1, 2]),
         save: tp.notes.save(() => null),
       },
-      parse: tp.parse((value) => value),
+      parse: tp.parse(({ input: value }) => value),
     })
 
     const error = await drifting
@@ -105,7 +107,7 @@ describe("valibot schemas", () => {
     })
     const client = createClient(
       signup,
-      createRouter(signup, { register: (name) => `welcome ${name}` }).dispatch
+      createRouter(signup, { register: ({ input: name }) => `welcome ${name}` }).dispatch
     )
 
     await expect(client.register("grace")).resolves.toBe("welcome grace")

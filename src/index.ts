@@ -21,4 +21,4 @@ export {
   type Implementer,
 } from "./lib/server/implement"
 export { createRouter, type DispatchOptions, mergeRouters, type Router } from "./lib/server/router"
-export type { InferResolvers, Resolver, ResolverOptions } from "./lib/server/types"
+export type { InferResolvers, Resolver, ResolverArgs } from "./lib/server/types"

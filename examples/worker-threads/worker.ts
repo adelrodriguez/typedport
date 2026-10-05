@@ -11,7 +11,7 @@ if (!parentPort) {
 }
 
 const router = createRouter(contract, {
-  "primes.count": ({ below }) => countPrimes(below),
+  "primes.count": ({ input: { below } }) => countPrimes(below),
 })
 
 connect(nodePort(parentPort), { router })

@@ -243,7 +243,7 @@ export function mergeRouters<const Routers extends readonly AnyRouter[]>(
   return { channels: [...owners.keys()], dispatch }
 }
 
-type AnyResolver = (input: unknown, options: { context: unknown; signal: AbortSignal }) => unknown
+type AnyResolver = (args: { input: unknown; context: unknown; signal: AbortSignal }) => unknown
 
 function buildRouter(contract: ContractTree, resolvers: object): Router<never> {
   const leaves = flatten(contract)
@@ -290,7 +290,7 @@ function buildRouter(contract: ContractTree, resolvers: object): Router<never> {
       const input = await parseWith(leaf.input, raw)
       // A caller that gave up while input was parsing must not start the resolver.
       signal.throwIfAborted()
-      const result = await resolver(input, { context, signal })
+      const result = await resolver({ context, input, signal })
 
       return leaf.output ? await parseOutput(leaf.output, result) : undefined
     })

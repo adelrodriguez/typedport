@@ -91,7 +91,7 @@ describe("webSocket", () => {
     const [serverSocket, clientSocket] = createSocketPair()
 
     const router = createRouter(contract, {
-      "math.add": ({ a, b }) => a + b,
+      "math.add": ({ input: { a, b } }) => a + b,
       ping: () => "pong" as const,
     })
     connect(webSocket(serverSocket), { router })
@@ -107,7 +107,7 @@ describe("webSocket", () => {
 
     connect(webSocket(serverSocket), {
       router: createRouter(contract, {
-        "math.add": ({ a, b }) => a + b,
+        "math.add": ({ input: { a, b } }) => a + b,
         ping: () => "pong" as const,
       }),
     })

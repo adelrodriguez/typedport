@@ -21,8 +21,10 @@ A flat resolver map passed to `createRouter` gets hard to read past a dozen chan
    // files/handlers.ts
    import { tp } from "../contract"
 
-   export const open = tp.files.open(async (_input, { context }) => openFile(context.userId))
-   export const save = tp.files.save(async ({ contents, path }) => saveFile(path, contents))
+   export const open = tp.files.open(async ({ context }) => openFile(context.userId))
+   export const save = tp.files.save(async ({ input: { contents, path } }) =>
+     saveFile(path, contents)
+   )
    ```
 
 3. Pass `createRouter` an object with the same shape as the contract. A namespace import of a handler module already has that shape.
@@ -58,7 +60,7 @@ If you prefer the flat map, fix the context type once and let the contract be in
 const createSessionRouter = createRouter.$context<Session>()
 
 const router = createSessionRouter(contract, {
-  "files.open": async (_input, { context }) => openFile(context.userId),
+  "files.open": async ({ context }) => openFile(context.userId),
   // ...
 })
 ```

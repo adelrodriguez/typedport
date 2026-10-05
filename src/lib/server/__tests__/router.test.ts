@@ -77,7 +77,7 @@ async function settleTimers(): Promise<void> {
 describe("createRouter", () => {
   test("lists every channel", () => {
     const router = createRouter(contract, {
-      "math.add": ({ a, b }) => a + b,
+      "math.add": ({ input: { a, b } }) => a + b,
       notify: () => null,
     })
 
@@ -86,7 +86,7 @@ describe("createRouter", () => {
 
   test("parses input before the resolver runs, applying defaults", async () => {
     const router = createRouter(contract, {
-      "math.add": ({ a, b }) => a + b,
+      "math.add": ({ input: { a, b } }) => a + b,
       notify: () => null,
     })
 
@@ -96,7 +96,7 @@ describe("createRouter", () => {
   test("rejects invalid input without calling the resolver", async () => {
     let called = false
     const router = createRouter(contract, {
-      "math.add": ({ a, b }) => {
+      "math.add": ({ input: { a, b } }) => {
         called = true
         return a + b
       },
@@ -109,7 +109,7 @@ describe("createRouter", () => {
 
   test("rejects unknown channels", async () => {
     const router = createRouter(contract, {
-      "math.add": ({ a, b }) => a + b,
+      "math.add": ({ input: { a, b } }) => a + b,
       notify: () => null,
     })
 
@@ -120,7 +120,7 @@ describe("createRouter", () => {
 
   test("rejects Object.prototype member names as unknown channels", async () => {
     const router = createRouter(contract, {
-      "math.add": ({ a, b }) => a + b,
+      "math.add": ({ input: { a, b } }) => a + b,
       notify: () => null,
     })
 
@@ -139,7 +139,7 @@ describe("createRouter", () => {
   test("throws at construction when a flat map misses a leaf", () => {
     expect(() =>
       createRouter(contract, {
-        "math.add": ({ a, b }: { a: number; b: number }) => a + b,
+        "math.add": ({ input: { a, b } }: { input: { a: number; b: number } }) => a + b,
       } as never)
     ).toThrow('Missing resolver for "notify"')
   })
@@ -161,11 +161,11 @@ describe("createRouter", () => {
   test("passes the edge's context to every resolver", async () => {
     const seen: string[] = []
     const router = createRouter<typeof contract, { userId: string }>(contract, {
-      "math.add": ({ a, b }, { context: session }) => {
+      "math.add": ({ input: { a, b }, context: session }) => {
         seen.push(session.userId)
         return a + b
       },
-      notify: (_payload, { context: session }) => {
+      notify: ({ context: session }) => {
         seen.push(session.userId)
       },
     })
@@ -183,7 +183,7 @@ describe("createRouter", () => {
     type TreeNode = { children: TreeNode[]; parent: TreeNode | null }
     const root: TreeNode = { children: [], parent: null }
     const router = createRouter<typeof contract, { node: TreeNode }>(contract, {
-      "math.add": ({ a, b }, { context: { node } }) => a + b + node.children.length,
+      "math.add": ({ input: { a, b }, context: { node } }) => a + b + node.children.length,
       notify: () => null,
     })
 
@@ -198,7 +198,7 @@ describe("createRouter", () => {
     const session: Session = { userId: "ada" }
     const controller = new AbortController()
     const router = createSessionRouter(contract, {
-      "math.add": (input, { context, signal }) => {
+      "math.add": ({ input, context, signal }) => {
         expectTypeOf(input).toEqualTypeOf<{ a: number; b: number }>()
         expectTypeOf(context).toEqualTypeOf<Session>()
         expectTypeOf(signal).toEqualTypeOf<AbortSignal>()
@@ -206,7 +206,7 @@ describe("createRouter", () => {
         expect(signal).toBe(controller.signal)
         return input.a + input.b
       },
-      notify: ({ message }, { context }) => {
+      notify: ({ input: { message }, context }) => {
         expectTypeOf(message).toEqualTypeOf<string>()
         expectTypeOf(context).toEqualTypeOf<Session>()
         expect(context).toBe(session)
@@ -217,7 +217,7 @@ describe("createRouter", () => {
       user: { name: channel({ input: z.void(), output: z.string() }) },
     })
     const otherRouter = createSessionRouter(otherContract, {
-      "user.name": (input, { context }) => {
+      "user.name": ({ input, context }) => {
         expectTypeOf(input).toBeVoid()
         expectTypeOf(context).toEqualTypeOf<Session>()
         return context.userId
@@ -243,7 +243,7 @@ describe("createRouter", () => {
     type TreeNode = { children: TreeNode[]; parent: TreeNode | null }
     const createTreeRouter = createRouter.$context<{ node: TreeNode }>()
     const router = createTreeRouter(contract, {
-      "math.add": ({ a, b }, { context: { node } }) => a + b + node.children.length,
+      "math.add": ({ input: { a, b }, context: { node } }) => a + b + node.children.length,
       notify: () => null,
     })
 
@@ -255,8 +255,8 @@ describe("createRouter", () => {
   test("dispatches one-way leaves, discarding the resolver's result", async () => {
     const received: string[] = []
     const router = createRouter(contract, {
-      "math.add": ({ a, b }) => a + b,
-      notify: ({ message }) => {
+      "math.add": ({ input: { a, b } }) => a + b,
+      notify: ({ input: { message } }) => {
         received.push(message)
         return "discarded"
       },
@@ -269,7 +269,7 @@ describe("createRouter", () => {
   test("gives every resolver a signal, even when the edge passes none", async () => {
     let seen: AbortSignal | undefined
     const router = createRouter(contract, {
-      "math.add": ({ a, b }, { signal }) => {
+      "math.add": ({ input: { a, b }, signal }) => {
         seen = signal
         return a + b
       },
@@ -286,7 +286,7 @@ describe("createRouter", () => {
     const controller = new AbortController()
     let resolverSignal: AbortSignal | undefined
     const router = createRouter(contract, {
-      "math.add": (_input, { signal }) => {
+      "math.add": ({ signal }) => {
         resolverSignal = signal
         return new Promise<number>(() => {
           // Never settles: only the abort can release the caller.
@@ -307,7 +307,7 @@ describe("createRouter", () => {
   test("does not run the resolver for an already-aborted signal", async () => {
     let called = false
     const router = createRouter(contract, {
-      "math.add": ({ a, b }) => {
+      "math.add": ({ input: { a, b } }) => {
         called = true
         return a + b
       },
@@ -322,7 +322,7 @@ describe("createRouter", () => {
 
   test("dispatch is a transport, so an in-memory client can cancel with $with", async () => {
     const router = createRouter(contract, {
-      "math.add": (_input, { signal }) =>
+      "math.add": ({ signal }) =>
         new Promise<number>((_resolve, reject) => {
           signal.addEventListener("abort", () => {
             reject(new Error("resolver stopped"))
@@ -347,7 +347,7 @@ describe("createRouter", () => {
       const gated = defineContract({ add: channel({ input: schema, output: z.number() }) })
       let called = false
       const router = createRouter(gated, {
-        add: (n) => {
+        add: ({ input: n }) => {
           called = true
           return n
         },
@@ -366,7 +366,7 @@ describe("createRouter", () => {
     test("releases the caller while async output parsing is pending", async () => {
       const { entered, release, schema } = gatedSchema()
       const gated = defineContract({ add: channel({ input: z.number(), output: schema }) })
-      const router = createRouter(gated, { add: (n) => n })
+      const router = createRouter(gated, { add: ({ input: n }) => n })
       const controller = new AbortController()
 
       const call = router.dispatch("add", 5, { signal: controller.signal })
@@ -394,7 +394,7 @@ describe("createRouter", () => {
         const watcher = watchUnhandled()
         const controller = new AbortController()
         const router = createRouter(contract, {
-          "math.add": (_input, { signal }) => {
+          "math.add": ({ signal }) => {
             controller.abort("closed by resolver")
             return finish(signal)
           },
@@ -416,7 +416,7 @@ describe("createRouter", () => {
 function typeAssertions(): void {
   const createSessionRouter = createRouter.$context<{ userId: string }>()
   const resolvers = {
-    "math.add": ({ a, b }: { a: number; b: number }) => a + b,
+    "math.add": ({ input: { a, b } }: { input: { a: number; b: number } }) => a + b,
     notify: () => null,
   }
   const router = createSessionRouter(contract, resolvers)
@@ -438,7 +438,7 @@ function typeAssertions(): void {
   // oxlint-disable-next-line no-invalid-void-type -- void is the no-context sentinel
   const createNoContextRouter = createRouter.$context<void>()
   const noContextRouter = createNoContextRouter(contract, {
-    "math.add": ({ a, b }, { context }) => {
+    "math.add": ({ input: { a, b }, context }) => {
       expectTypeOf(context).toBeVoid()
       return a + b
     },
@@ -461,12 +461,12 @@ describe("mergeRouters", () => {
     files: {
       read: implement(filesContract)
         .$context<{ sender: string }>()
-        .files.read((path, { context }) => `${context.sender}:${path}`),
+        .files.read(({ input: path, context }) => `${context.sender}:${path}`),
     },
   })
-  const pingRouter = createRouter(pingContract, { ping: (name) => `pong ${name}` })
+  const pingRouter = createRouter(pingContract, { ping: ({ input: name }) => `pong ${name}` })
   const meRouter = createRouter<typeof meContract, { userId: number }>(meContract, {
-    me: (offset, { context }) => context.userId + offset,
+    me: ({ input: offset, context }) => context.userId + offset,
   })
 
   test("lists every router's channels", () => {
@@ -493,7 +493,7 @@ describe("mergeRouters", () => {
   })
 
   test("throws duplicate-channel when two routers declare the same path", () => {
-    const other = createRouter(pingContract, { ping: (name) => name })
+    const other = createRouter(pingContract, { ping: ({ input: name }) => name })
 
     expect(() => mergeRouters(pingRouter, other)).toThrow(
       expect.objectContaining({ code: "duplicate-channel", path: "ping" })
@@ -527,7 +527,7 @@ describe("mergeRouters", () => {
   test("passes the signal to the owning router", async () => {
     const seen: AbortSignal[] = []
     const watching = createRouter(pingContract, {
-      ping: (name, { signal }) => {
+      ping: ({ input: name, signal }) => {
         seen.push(signal)
         return name
       },
@@ -554,7 +554,7 @@ describe("mergeRouters", () => {
   test("passes the call's context to context-free routers too", async () => {
     const seen: unknown[] = []
     const freeRouter = createRouter(pingContract, {
-      ping: (name, { context }) => {
+      ping: ({ input: name, context }) => {
         seen.push(context)
         return name
       },
@@ -572,7 +572,7 @@ describe("mergeRouters", () => {
       session: channel({ input: z.string(), output: z.string() }),
     })
     const sessionRouter = createRouter<typeof sessionContract, Session>(sessionContract, {
-      session: (_input, { context }) => context.kind,
+      session: ({ context }) => context.kind,
     })
     const router = mergeRouters(sessionRouter, pingRouter)
 
