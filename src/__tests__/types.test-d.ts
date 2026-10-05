@@ -1,5 +1,4 @@
-// Type assertions are enforced by `pnpm run typecheck`, not Vitest.
-import { describe, test } from "vitest"
+// Compile-time checks only: `pnpm run typecheck` enforces this file, and Vitest never runs it.
 import * as z from "zod"
 import type { Wire } from "../lib/wire/types"
 import {
@@ -55,95 +54,101 @@ const unknownRouter = createRouter<typeof pingContract, unknown>(pingContract, {
 })
 
 // ── Positive type-level tests ────────────────────────────────────────────────
-describe("mergeRouters", () => {
-  test("intersects the contexts of separate routers", () => {
-    const router = mergeRouters(filesRouter, pingRouter, meRouter)
+// mergeRouters intersects the contexts of separate routers.
+{
+  const router = mergeRouters(filesRouter, pingRouter, meRouter)
 
-    type _Merged = Expect<Equal<typeof router, Router<Sender & User>>>
-    type _Options = Expect<
-      Equal<Parameters<typeof router.dispatch>[2], DispatchOptions<Sender & User>>
-    >
-  })
+  type _Merged = Expect<Equal<typeof router, Router<Sender & User>>>
+  type _Options = Expect<
+    Equal<Parameters<typeof router.dispatch>[2], DispatchOptions<Sender & User>>
+  >
+}
 
-  test("merges the same contexts in any order", () => {
-    const forward = mergeRouters(filesRouter, meRouter)
-    const backward = mergeRouters(meRouter, filesRouter)
+// mergeRouters merges the same contexts in any order.
+{
+  const forward = mergeRouters(filesRouter, meRouter)
+  const backward = mergeRouters(meRouter, filesRouter)
 
-    type _Order = Expect<Equal<typeof forward, typeof backward>>
-  })
+  type _Order = Expect<Equal<typeof forward, typeof backward>>
+}
 
-  test("keeps a single router's context as it was", () => {
-    type _Object = Expect<Equal<ReturnType<typeof mergeRouters<[typeof meRouter]>>, Router<User>>>
-    type _Union = Expect<
-      Equal<ReturnType<typeof mergeRouters<[typeof sessionRouter]>>, Router<Session>>
-    >
-    type _Unknown = Expect<
-      Equal<ReturnType<typeof mergeRouters<[typeof unknownRouter]>>, Router<unknown>>
-    >
-  })
+// mergeRouters keeps a single router's context as it was.
+type _SingleObject = Expect<Equal<ReturnType<typeof mergeRouters<[typeof meRouter]>>, Router<User>>>
+type _SingleUnion = Expect<
+  Equal<ReturnType<typeof mergeRouters<[typeof sessionRouter]>>, Router<Session>>
+>
+type _SingleUnknown = Expect<
+  Equal<ReturnType<typeof mergeRouters<[typeof unknownRouter]>>, Router<unknown>>
+>
 
-  test("keeps a union context whole beside other routers", () => {
-    const router = mergeRouters(sessionRouter, pingRouter)
+// mergeRouters keeps a union context whole beside other routers.
+{
+  const router = mergeRouters(sessionRouter, pingRouter)
 
-    type _Union = Expect<Equal<typeof router, Router<Session>>>
-  })
+  type _Union = Expect<Equal<typeof router, Router<Session>>>
+}
 
-  test("does not let an unknown context absorb required ones", () => {
-    const router = mergeRouters(meRouter, unknownRouter)
+// mergeRouters does not let an unknown context absorb required ones.
+{
+  const router = mergeRouters(meRouter, unknownRouter)
 
-    type _Required = Expect<Equal<typeof router, Router<User>>>
-  })
+  type _Required = Expect<Equal<typeof router, Router<User>>>
+}
 
-  test("is context-free when no router has a context", () => {
-    const router = mergeRouters(pingRouter)
-    const empty = mergeRouters()
+// mergeRouters is context-free when no router has a context.
+{
+  const router = mergeRouters(pingRouter)
+  const empty = mergeRouters()
 
-    // `Router` defaults its context to `void`, the no-context sentinel.
-    type _Void = Expect<Equal<typeof router, Router>>
-    type _Empty = Expect<Equal<typeof empty, Router>>
-    type _Transport = Expect<typeof router.dispatch extends Transport ? true : false>
-    type _EmptyTransport = Expect<typeof empty.dispatch extends Transport ? true : false>
-  })
+  // `Router` defaults its context to `void`, the no-context sentinel.
+  type _Void = Expect<Equal<typeof router, Router>>
+  type _Empty = Expect<Equal<typeof empty, Router>>
+  type _Transport = Expect<typeof router.dispatch extends Transport ? true : false>
+  type _EmptyTransport = Expect<typeof empty.dispatch extends Transport ? true : false>
+}
 
-  test("nests", () => {
-    const router = mergeRouters(mergeRouters(filesRouter, pingRouter), meRouter)
+// mergeRouters nests.
+{
+  const router = mergeRouters(mergeRouters(filesRouter, pingRouter), meRouter)
 
-    type _Nested = Expect<Equal<typeof router, Router<Sender & User>>>
-  })
+  type _Nested = Expect<Equal<typeof router, Router<Sender & User>>>
+}
 
-  test("merges arrays of unknown length", () => {
-    const routers: Array<typeof meRouter> = [meRouter]
-    const mixed: Array<typeof meRouter | typeof filesRouter> = [meRouter, filesRouter]
-    const spread = mergeRouters(...routers)
-    const trailing = mergeRouters(...routers, filesRouter)
-    const leading = mergeRouters(filesRouter, ...routers)
-    const union = mergeRouters(...mixed)
+// mergeRouters merges arrays of unknown length.
+{
+  const routers: Array<typeof meRouter> = [meRouter]
+  const mixed: Array<typeof meRouter | typeof filesRouter> = [meRouter, filesRouter]
+  const spread = mergeRouters(...routers)
+  const trailing = mergeRouters(...routers, filesRouter)
+  const leading = mergeRouters(filesRouter, ...routers)
+  const union = mergeRouters(...mixed)
 
-    type _Spread = Expect<Equal<typeof spread, Router<User>>>
-    type _Trailing = Expect<Equal<typeof trailing, Router<User & Sender>>>
-    type _Leading = Expect<Equal<typeof leading, Router<Sender & User>>>
-    type _Union = Expect<Equal<typeof union, Router<User & Sender>>>
-  })
+  type _Spread = Expect<Equal<typeof spread, Router<User>>>
+  type _Trailing = Expect<Equal<typeof trailing, Router<User & Sender>>>
+  type _Leading = Expect<Equal<typeof leading, Router<Sender & User>>>
+  type _Union = Expect<Equal<typeof union, Router<User & Sender>>>
+}
 
-  test("needs every member's context for a union-typed router argument", () => {
-    const either = Math.random() > 0.5 ? filesRouter : meRouter
-    const routers: Array<typeof pingRouter> = [pingRouter]
-    const alone = mergeRouters(either)
-    const leading = mergeRouters(either, ...routers)
-    const trailing = mergeRouters(...routers, either)
+// mergeRouters needs every member's context for a union-typed router argument.
+{
+  const either = Math.random() > 0.5 ? filesRouter : meRouter
+  const routers: Array<typeof pingRouter> = [pingRouter]
+  const alone = mergeRouters(either)
+  const leading = mergeRouters(either, ...routers)
+  const trailing = mergeRouters(...routers, either)
 
-    type _Alone = Expect<Equal<typeof alone, Router<Sender & User>>>
-    type _Leading = Expect<Equal<typeof leading, Router<Sender & User>>>
-    type _Trailing = Expect<Equal<typeof trailing, Router<Sender & User>>>
-  })
+  type _Alone = Expect<Equal<typeof alone, Router<Sender & User>>>
+  type _Leading = Expect<Equal<typeof leading, Router<Sender & User>>>
+  type _Trailing = Expect<Equal<typeof trailing, Router<Sender & User>>>
+}
 
-  test("serves through connect with the merged context", () => {
-    const wire: Wire = { onMessage: () => () => null, send: () => null }
-    const router = mergeRouters(filesRouter, meRouter)
+// mergeRouters serves through connect with the merged context.
+{
+  const wire: Wire = { onMessage: () => () => null, send: () => null }
+  const router = mergeRouters(filesRouter, meRouter)
 
-    void connect(wire, { context: { sender: "main", userId: 1 }, router })
-  })
-})
+  void connect(wire, { context: { sender: "main", userId: 1 }, router })
+}
 
 // ── Negative type tests ──────────────────────────────────────────────────────
 // These verify that invalid usage produces compile-time errors.
