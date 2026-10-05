@@ -1,5 +1,12 @@
 # typedport
 
+## 0.3.0
+
+### Minor Changes
+
+- 9f91ce8: Add `createRouter.$context<Context>()` to fix a router factory's context type once while inferring each contract. The factory accepts flat resolver maps and compatible handler trees, and `dispatch` still requires the context. Existing `createRouter` calls are unchanged.
+- 0d138df: Add `mergeRouters(...routers)`, which serves several routers as one `Router`. Its context is the intersection of the routers' contexts, and a channel that two routers declare throws a `SetupError` with the new code `duplicate-channel`.
+
 ## 0.2.1
 
 ### Patch Changes
