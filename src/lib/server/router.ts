@@ -63,8 +63,8 @@ export type Router<Context = void> = {
 type CreateRouter = {
   <Tree extends ContractTree, Handlers extends object>(
     contract: Tree,
-    handlers: Handlers & FragmentTree<Tree, ContextOfHandlers<Handlers>>
-  ): Router<ContextOfHandlers<Handlers>>
+    handlers: Handlers & FragmentTree<Tree, ContextOfHandlers<Handlers, Tree>>
+  ): Router<ContextOfHandlers<Handlers, Tree>>
   <Tree extends ContractTree, Context = void>(
     contract: Tree,
     resolvers: InferResolvers<Tree, Context>
@@ -76,7 +76,7 @@ type CreateRouter = {
 // signature recurses without terminating (TS2589). Concrete contracts are finite, so call sites
 // are unaffected; the cast stands in for the compatibility check.
 // oxlint-disable-next-line typescript/consistent-type-assertions -- see above
-export const createRouter: CreateRouter = buildRouter as CreateRouter
+export const createRouter = buildRouter as CreateRouter
 
 type AnyResolver = (input: unknown, options: { context: unknown; signal: AbortSignal }) => unknown
 

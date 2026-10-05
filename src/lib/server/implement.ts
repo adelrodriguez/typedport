@@ -90,13 +90,19 @@ export type FragmentTree<Tree, Context, Prefix extends string = ""> = {
 }
 
 /**
- * The union of fragments anywhere in a handler tree; stray non-fragment exports contribute nothing.
+ * The union of fragments at the contract's leaf positions in a handler tree; stray non-fragment
+ * exports contribute nothing. Walks the contract, not the handler object, like `flattenFragments`:
+ * the contract is finite, so the recursion always ends — walking the handlers instead would recurse
+ * into whatever else a caller passes, such as an explicit context type that references itself
+ * (TS2615), before overload resolution can fall back to the flat-map form.
  */
-type HandlerLeaves<Handlers> = Handlers extends AnyFragment
-  ? Handlers
-  : Handlers extends object
-    ? { [Key in keyof Handlers]: HandlerLeaves<Handlers[Key]> }[keyof Handlers]
+type HandlerLeaves<Handlers, Tree> = Tree extends Channel
+  ? Handlers extends AnyFragment
+    ? Handlers
     : never
+  : {
+      [Key in keyof Tree & keyof Handlers]: HandlerLeaves<Handlers[Key], Tree[Key]>
+    }[keyof Tree & keyof Handlers]
 
 type FragmentContext<F> = F extends Fragment<string, infer Context> ? Context : never
 
@@ -108,7 +114,7 @@ type FragmentContext<F> = F extends Fragment<string, infer Context> ? Context : 
  * `createRouter` signature because TypeScript cannot infer a type parameter through the mapped
  * conditional in `FragmentTree`.
  */
-export type ContextOfHandlers<Handlers> = FragmentContext<HandlerLeaves<Handlers>>
+export type ContextOfHandlers<Handlers, Tree> = FragmentContext<HandlerLeaves<Handlers, Tree>>
 
 /**
  * Flattens a handler tree into the dotted-path resolver map the router dispatches from. Walks the
