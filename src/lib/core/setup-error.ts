@@ -3,6 +3,7 @@
  */
 export type SetupErrorDetail =
   | { code: "dotted-key"; key: string; path: string }
+  | { code: "duplicate-channel"; path: string }
   | { code: "invalid-handler"; expected: "branch" | "fragment"; path: string }
   | { code: "misplaced-handler"; fragmentPath: string; path: string }
   | { code: "missing-resolver"; path: string }
@@ -13,6 +14,8 @@ function messageFor(detail: SetupErrorDetail): string {
   switch (detail.code) {
     case "dotted-key":
       return `Key "${detail.key}" at "${detail.path}" in contract must not contain "."`
+    case "duplicate-channel":
+      return `Channel "${detail.path}" is declared by more than one router`
     case "invalid-handler":
       return detail.expected === "fragment"
         ? `Handler for "${detail.path}" is not a fragment`
@@ -39,14 +42,15 @@ class SetupBaseError extends Error {
 
 /**
  * The error class for misusing typedport outside a call: a contract that can't be defined, a router
- * that can't be assembled, a port hand-off with no window. `ChannelError` is the other half —
- * failures of a call, serializable across the wire. A `SetupError` never travels: it surfaces where
- * the wiring happens, as a bug to fix rather than a condition to handle.
+ * that can't be assembled or merged, a port hand-off with no window. `ChannelError` is the other
+ * half — failures of a call, serializable across the wire. A `SetupError` never travels: it
+ * surfaces where the wiring happens, as a bug to fix rather than a condition to handle.
  *
  * - `reserved-key` (`key`, `path`) — a contract key the client proxy claims (`$`-helpers, `_kind`,
  *   `then`, `toJSON`)
  * - `dotted-key` (`key`, `path`) — a contract key containing `.`, which would collide with nesting
  * - `missing-resolver` (`path`) — a contract leaf with no resolver or fragment
+ * - `duplicate-channel` (`path`) — a channel that two routers passed to `mergeRouters` both declare
  * - `invalid-handler` (`path`, `expected`) — a handler-tree slot holding something other than the
  *   fragment or branch the contract demands
  * - `misplaced-handler` (`path`, `fragmentPath`) — a fragment built for another leaf

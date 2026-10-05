@@ -62,6 +62,17 @@ The factory accepts both flat resolver maps and handler trees from `implement()`
 
 This is a type-level operation, not a bound context value. `dispatch` still requires `{ context }` when the fixed type isn't `void`. The original `createRouter` keeps its default `void` context and handler-tree inference.
 
+### `mergeRouters(...routers)`
+
+Returns one `Router` that serves every router passed to it. Use it to pass an app with one router per feature to an edge that takes a single router, such as an IPC loop or `connect`.
+
+- `channels` lists every router's channels.
+- `dispatch` passes the call, with its `context` and `signal`, to the router that owns the path. That router parses input and output as usual. A path no router owns throws a `ChannelError` with code `unknown-channel`.
+- The context type is the intersection of the routers' context types. Routers without a context add nothing, so merging only context-free routers keeps `dispatch` a valid `Transport`.
+- The result is a `Router`, so you can merge it again.
+
+A channel that two routers declare throws a `SetupError` with code `duplicate-channel` when `mergeRouters` runs.
+
 ### Resolvers
 
 A resolver has the signature `(input, { context, signal }) => result`. It may be synchronous or async.
@@ -175,6 +186,7 @@ The class of every wiring mistake. It is thrown when you build something, and it
 | `reserved-key`      | A contract key is reserved                                                 | `key`, `path`          |
 | `dotted-key`        | A contract key contains `.`                                                | `key`, `path`          |
 | `missing-resolver`  | A contract leaf has no resolver                                            | `path`                 |
+| `duplicate-channel` | Two routers passed to `mergeRouters` declare the same channel              | `path`                 |
 | `invalid-handler`   | A handler tree has a non-fragment at a leaf, or a non-object at a branch   | `expected`, `path`     |
 | `misplaced-handler` | A fragment sits at a path other than its own                               | `fragmentPath`, `path` |
 | `no-window`         | `receivePort` or `relayPort` gets no `target` and finds no global `window` | `caller`               |
@@ -190,7 +202,7 @@ The class of every wiring mistake. It is thrown when you build something, and it
 | `InferResolvers<typeof contract, Context>` | The flat resolver map for a contract                    |
 | `Resolver<Leaf, Context>`                  | The resolver for one leaf                               |
 | `ResolverOptions<Context>`                 | A resolver's second argument, `{ context, signal }`     |
-| `Router<Context>`                          | The value `createRouter` returns                        |
+| `Router<Context>`                          | The value `createRouter` and `mergeRouters` return      |
 | `DispatchOptions<Context>`                 | The third argument of `dispatch`, `{ context, signal }` |
 | `Implementer`, `Fragment`, `FragmentTree`  | The builder, its handlers, and a tree of handlers       |
 | `ChannelErrorDetail`, `SetupErrorDetail`   | The `code` and extra fields of each error class         |

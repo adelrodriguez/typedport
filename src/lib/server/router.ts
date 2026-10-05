@@ -1,6 +1,6 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { ContextOfHandlers, FragmentTree } from "./implement"
-import type { InferResolvers } from "./types"
+import type { InferResolvers, UnionToIntersection } from "./types"
 import { type ContractTree, flatten } from "../core/contract"
 import { ChannelError } from "../core/error"
 import { parseWith } from "../core/schema"
@@ -99,6 +99,91 @@ export const createRouter: CreateRouter = Object.assign(buildRouter as CreateRou
   // Context exists only in the type system; at runtime the factory is unchanged.
   $context: () => createRouter,
 })
+
+// Any router at all. `Router<any>` would not do: `[any] extends [void]` picks the no-context
+// `dispatch`, which a router with a context is not assignable to.
+type AnyRouter = {
+  channels: readonly string[]
+  dispatch: (path: string, raw: unknown, ...options: never[]) => Promise<unknown>
+}
+
+type ContextOf<R> = R extends Router<infer Context> ? Context : never
+
+// The contexts the routers require; context-free routers contribute nothing.
+type RequiredContexts<Routers extends readonly AnyRouter[]> = {
+  // oxlint-disable-next-line no-invalid-void-type -- void is the no-context sentinel, as in `DispatchOptions`
+  [Index in keyof Routers]: [ContextOf<Routers[Index]>] extends [void]
+    ? never
+    : ContextOf<Routers[Index]>
+}[number]
+
+/**
+ * The context of a merged router: the intersection of the routers' contexts, or `void` when none
+ * has one. The `never` check comes first because intersecting nothing yields `unknown`, which would
+ * demand a context and stop `dispatch` from being a `Transport`.
+ */
+type MergedContext<Routers extends readonly AnyRouter[]> = [RequiredContexts<Routers>] extends [
+  never,
+]
+  ? // oxlint-disable-next-line no-invalid-void-type -- void is the no-context sentinel, as in `DispatchOptions`
+    void
+  : UnionToIntersection<RequiredContexts<Routers>>
+
+/**
+ * Serves several routers as one, so an edge that takes a single router (an IPC loop, `connect`,
+ * `createClient` in tests) can serve an app split into one router per feature. `channels` lists
+ * every router's channels, and `dispatch` hands the call, `context` and `signal` included, to the
+ * router that owns the path, which parses as it always does.
+ *
+ * Two routers declaring the same channel throw a `SetupError` with code `duplicate-channel` here,
+ * before any edge registers anything. The merged context is the intersection of the routers'
+ * contexts: routers needing `{ sender }` and `{ userId }` merge into one needing both, and each
+ * resolver still receives the whole object. Context-free routers add nothing, so merging only those
+ * keeps `dispatch` a valid `Transport`. The result is a `Router`, so merges nest.
+ */
+export function mergeRouters<const Routers extends readonly AnyRouter[]>(
+  ...routers: Routers
+): Router<MergedContext<Routers>> {
+  // A Map, not an object: an untrusted path such as "constructor" must miss, not resolve to an
+  // `Object.prototype` member.
+  const owners = new Map<string, AnyRouter>()
+
+  for (const router of routers) {
+    for (const channel of router.channels) {
+      if (owners.has(channel)) {
+        throw new SetupError({ code: "duplicate-channel", path: channel })
+      }
+
+      owners.set(channel, router)
+    }
+  }
+
+  const dispatch = async (
+    path: string,
+    raw: unknown,
+    options?: { context?: unknown; signal?: AbortSignal }
+  ): Promise<unknown> => {
+    const owner = owners.get(path)
+
+    // Same order as a single router: a caller that already gave up hears its own reason.
+    options?.signal?.throwIfAborted()
+
+    if (!owner) {
+      throw new ChannelError({ code: "unknown-channel", path })
+    }
+
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- the owner accepts the slice of the merged context it declared, and the intersection carries every slice
+    const forward = owner.dispatch as (
+      path: string,
+      raw: unknown,
+      options?: object
+    ) => Promise<unknown>
+
+    return await forward(path, raw, options)
+  }
+
+  return { channels: [...owners.keys()], dispatch }
+}
 
 type AnyResolver = (input: unknown, options: { context: unknown; signal: AbortSignal }) => unknown
 
