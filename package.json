@@ -1,6 +1,6 @@
 {
   "name": "typedport",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Type-safe RPC from a Standard Schema contract, over any transport: Electron IPC, workers, WebSockets, HTTP, or message queues",
   "keywords": [
     "arktype",
