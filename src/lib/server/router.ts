@@ -193,6 +193,10 @@ type MergedContext<Routers extends readonly AnyRouter[]> = FoldContexts<Routers,
  * contexts: routers needing `{ sender }` and `{ userId }` merge into one needing both, and each
  * resolver still receives the whole object. Context-free routers add nothing, so merging only those
  * keeps `dispatch` a valid `Transport`. The result is a `Router`, so merges nest.
+ *
+ * Whether a router takes a context exists only in its type, so every owner receives the context the
+ * call carried: a context-free router merged beside one that needs `{ sender }` sees `{ sender }`
+ * at runtime, though its resolvers are typed `void`.
  */
 export function mergeRouters<const Routers extends readonly AnyRouter[]>(
   ...routers: Routers

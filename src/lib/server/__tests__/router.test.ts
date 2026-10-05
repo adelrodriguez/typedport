@@ -551,6 +551,21 @@ describe("mergeRouters", () => {
     )
   })
 
+  test("passes the call's context to context-free routers too", async () => {
+    const seen: unknown[] = []
+    const freeRouter = createRouter(pingContract, {
+      ping: (name, { context }) => {
+        seen.push(context)
+        return name
+      },
+    })
+    const router = mergeRouters(freeRouter, meRouter)
+
+    await router.dispatch("ping", "ada", { context: { userId: 7 } })
+
+    expect(seen).toEqual([{ userId: 7 }])
+  })
+
   test("passes a union context through whole", async () => {
     type Session = { kind: "guest" } | { kind: "user"; userId: string }
     const sessionContract = defineContract({

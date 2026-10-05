@@ -69,6 +69,7 @@ Returns one `Router` that serves every router passed to it. Use it to pass an ap
 - `channels` lists every router's channels.
 - `dispatch` passes the call, with its `context` and `signal`, to the router that owns the path. That router parses input and output as usual. A path no router owns throws a `ChannelError` with code `unknown-channel`.
 - The context type is the intersection of the routers' context types. Routers without a context add nothing, so merging only context-free routers keeps `dispatch` a valid `Transport`.
+- Every router receives the context the call carries, including context-free routers merged beside routers that need one. Their resolvers are typed `void`, so don't rely on `context` being `undefined` in them.
 - The result is a `Router`, so you can merge it again.
 
 A channel that two routers declare throws a `SetupError` with code `duplicate-channel` when `mergeRouters` runs.
@@ -79,10 +80,10 @@ A resolver has the signature `(input, { context, signal }) => result`. It may be
 
 `input` is the router's parsed value, with defaults and transforms applied.
 
-| Option    | Description                                                                              |
-| --------- | ---------------------------------------------------------------------------------------- |
-| `context` | The `context` the edge passed to `dispatch`. `undefined` when the context type is `void` |
-| `signal`  | Aborts when the caller gives up. Always present. Never aborts if the edge passed none    |
+| Option    | Description                                                                                                                                         |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `context` | The `context` the edge passed to `dispatch`. `undefined` when the context type is `void`, unless the router is merged with one that needs a context |
+| `signal`  | Aborts when the caller gives up. Always present. Never aborts if the edge passed none                                                               |
 
 ### `Router`
 
