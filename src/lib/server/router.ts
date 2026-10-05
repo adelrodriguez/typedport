@@ -109,25 +109,41 @@ type AnyRouter = {
 
 type ContextOf<R> = R extends Router<infer Context> ? Context : never
 
-// The contexts the routers require; context-free routers contribute nothing.
-type RequiredContexts<Routers extends readonly AnyRouter[]> = {
-  // oxlint-disable-next-line no-invalid-void-type -- void is the no-context sentinel, as in `DispatchOptions`
-  [Index in keyof Routers]: [ContextOf<Routers[Index]>] extends [void]
+// One router's required context, boxed so that intersecting several boxes intersects whole contexts
+// (a union context stays a union). Context-free routers box to nothing.
+type BoxedContext<R> = R extends AnyRouter
+  ? // oxlint-disable-next-line no-invalid-void-type -- void is the no-context sentinel, as in `DispatchOptions`
+    [ContextOf<R>] extends [void]
     ? never
-    : ContextOf<Routers[Index]>
-}[number]
+    : { context: ContextOf<R> }
+  : never
+
+// Every router's boxed context, intersected. Walks a tuple from both ends so a variadic tuple
+// (`[...routers, extra]`) keeps its fixed elements apart; an array of unknown length contributes
+// its element type once.
+type MergedBox<Routers extends readonly AnyRouter[]> = Routers extends readonly [
+  infer Head,
+  ...infer Tail extends readonly AnyRouter[],
+]
+  ? BoxOrNothing<BoxedContext<Head>> & MergedBox<Tail>
+  : Routers extends readonly [...infer Init extends readonly AnyRouter[], infer Last]
+    ? MergedBox<Init> & BoxOrNothing<BoxedContext<Last>>
+    : BoxOrNothing<UnionToIntersection<BoxedContext<Routers[number]>>>
+
+type BoxOrNothing<Box> = [Box] extends [never] ? unknown : Box
 
 /**
  * The context of a merged router: the intersection of the routers' contexts, or `void` when none
- * has one. The `never` check comes first because intersecting nothing yields `unknown`, which would
- * demand a context and stop `dispatch` from being a `Transport`.
+ * has one. Contexts are intersected whole, never by intersecting a union of them, which would also
+ * intersect the members of a union context (`{ kind: "guest" } | { kind: "user" }` would collapse
+ * to `never`) and let an `unknown` context absorb the others. The `void` fallback keeps `dispatch`
+ * a `Transport` when nothing is required.
  */
-type MergedContext<Routers extends readonly AnyRouter[]> = [RequiredContexts<Routers>] extends [
-  never,
-]
-  ? // oxlint-disable-next-line no-invalid-void-type -- void is the no-context sentinel, as in `DispatchOptions`
-    void
-  : UnionToIntersection<RequiredContexts<Routers>>
+type MergedContext<Routers extends readonly AnyRouter[]> =
+  MergedBox<Routers> extends { context: infer Context }
+    ? Context
+    : // oxlint-disable-next-line no-invalid-void-type -- void is the no-context sentinel, as in `DispatchOptions`
+      void
 
 /**
  * Serves several routers as one, so an edge that takes a single router (an IPC loop, `connect`,

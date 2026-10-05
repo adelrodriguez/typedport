@@ -7,7 +7,7 @@ import { defineContract, channel } from "../../core/contract"
 import { ChannelError } from "../../core/error"
 import { SetupError } from "../../core/setup-error"
 import { implement } from "../implement"
-import { createRouter, mergeRouters, type Router } from "../router"
+import { createRouter, type DispatchOptions, mergeRouters, type Router } from "../router"
 
 const contract = defineContract({
   math: {
@@ -565,6 +565,44 @@ describe("mergeRouters", () => {
     void router.dispatch("ping", "ada", { context: { sender: "main" } }).catch(() => null)
     // @ts-expect-error the merged router needs a context at all
     void router.dispatch("ping", "ada").catch(() => null)
+  })
+
+  test("keeps a union context whole", async () => {
+    type Session = { kind: "guest" } | { kind: "user"; userId: string }
+    const sessionContract = defineContract({
+      session: channel({ input: z.string(), output: z.string() }),
+    })
+    const sessionRouter = createRouter<typeof sessionContract, Session>(sessionContract, {
+      session: (_input, { context }) => context.kind,
+    })
+    const router = mergeRouters(sessionRouter, pingRouter)
+
+    expectTypeOf(router.dispatch).parameter(2).toEqualTypeOf<DispatchOptions<Session>>()
+    await expect(router.dispatch("session", "hi", { context: { kind: "guest" } })).resolves.toBe(
+      "guest"
+    )
+
+    // @ts-expect-error the union context is still required
+    void router.dispatch("session", "hi").catch(() => null)
+  })
+
+  test("keeps other routers' requirements when one takes unknown", () => {
+    const unknownRouter = createRouter<typeof pingContract, unknown>(pingContract, {
+      ping: (name) => name,
+    })
+    const router = mergeRouters(meRouter, unknownRouter)
+
+    expectTypeOf(router.dispatch).parameter(2).toEqualTypeOf<DispatchOptions<{ userId: number }>>()
+
+    // @ts-expect-error `userId` is still required
+    void router.dispatch("me", 1, { context: {} }).catch(() => null)
+  })
+
+  test("merges an array of routers of unknown length", () => {
+    const routers: Array<typeof meRouter> = [meRouter]
+    const router = mergeRouters(...routers, pingRouter)
+
+    expectTypeOf(router.dispatch).parameter(2).toEqualTypeOf<DispatchOptions<{ userId: number }>>()
   })
 
   test("keeps dispatch a Transport when no router has a context", async () => {
