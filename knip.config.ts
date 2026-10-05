@@ -5,7 +5,7 @@ import analyze from "adamantite/analyze"
 // types, which the declaration build cannot name (TS2883).
 const config: KnipConfig = {
   ...analyze,
-  entry: ["examples/**/*.ts"],
+  entry: ["examples/**/*.ts", "scripts/*.ts"],
   // Knip always analyzes its own config as a production entry, so `--strict` reports the
   // `adamantite` devDependency it imports as unlisted.
   ignore: ["knip.config.ts"],
@@ -13,7 +13,7 @@ const config: KnipConfig = {
   // consumers need it as a runtime dependency.
   ignoreDependencies: ["@standard-schema/spec"],
   ignoreFiles: [],
-  project: ["src/**/*.ts", "examples/**/*.ts", "*.config.ts"],
+  project: ["src/**/*.ts", "examples/**/*.ts", "scripts/*.ts", "*.config.ts"],
 }
 
 export default config

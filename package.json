@@ -57,6 +57,7 @@
   "scripts": {
     "analyze": "adamantite analyze --strict",
     "build": "tsdown",
+    "build:verify": "pnpm run build && node scripts/verify-build.ts",
     "bump:deps": "pnpm update --interactive --latest",
     "check": "adamantite check",
     "dev": "tsdown --watch",
