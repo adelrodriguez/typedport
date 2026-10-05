@@ -212,6 +212,47 @@ async function _negativeTypeTests(wire: Wire): Promise<void> {
   // @ts-expect-error -- the same holds for a fixed argument after a spread
   await afterSpread.dispatch("me", 1, { context: { userId: 1 } })
 
+  const userLiteral = createRouter<typeof pingContract, "user">(pingContract, {
+    ping: (name, { context }) => `${context}:${name}`,
+  })
+  const guestLiteral = createRouter<typeof pingContract, "guest">(pingContract, {
+    ping: (name, { context }) => `${context}:${name}`,
+  })
+  const literalChoice = Math.random() > 0.5 ? userLiteral : guestLiteral
+  const literalRouters: Array<typeof pingRouter> = [pingRouter]
+
+  const literalAlone = mergeRouters(literalChoice)
+
+  // @ts-expect-error -- incompatible literal contexts (alone) must not make dispatch context-free
+  await literalAlone.dispatch("ping", "ada")
+
+  // @ts-expect-error -- incompatible literal contexts (alone) do not make a Transport
+  const _literalAloneTransport: Transport = literalAlone.dispatch
+
+  const literalLeading = mergeRouters(literalChoice, ...literalRouters)
+
+  // @ts-expect-error -- incompatible literal contexts (before a spread) must not make dispatch context-free
+  await literalLeading.dispatch("ping", "ada")
+
+  // @ts-expect-error -- incompatible literal contexts (before a spread) do not make a Transport
+  const _literalLeadingTransport: Transport = literalLeading.dispatch
+
+  const literalTrailing = mergeRouters(...literalRouters, literalChoice)
+
+  // @ts-expect-error -- incompatible literal contexts (after a spread) must not make dispatch context-free
+  await literalTrailing.dispatch("ping", "ada")
+
+  // @ts-expect-error -- incompatible literal contexts (after a spread) do not make a Transport
+  const _literalTrailingTransport: Transport = literalTrailing.dispatch
+
+  const literalNested = mergeRouters(mergeRouters(literalChoice))
+
+  // @ts-expect-error -- incompatible literal contexts (nested) must not make dispatch context-free
+  await literalNested.dispatch("ping", "ada")
+
+  // @ts-expect-error -- incompatible literal contexts (nested) do not make a Transport
+  const _literalNestedTransport: Transport = literalNested.dispatch
+
   // @ts-expect-error -- a router that needs a context is not a Transport
   const _transport: Transport = merged.dispatch
 

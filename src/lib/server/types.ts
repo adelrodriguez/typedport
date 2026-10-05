@@ -2,7 +2,7 @@ import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { Channel } from "../core/contract"
 import type { Join, MaybePromise } from "../core/types"
 
-export type UnionToIntersection<U> = (U extends unknown ? (k: U) => void : never) extends (
+type UnionToIntersection<U> = (U extends unknown ? (k: U) => void : never) extends (
   k: infer I
 ) => void
   ? I

@@ -1,6 +1,6 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { ContextOfHandlers, FragmentTree } from "./implement"
-import type { InferResolvers, UnionToIntersection } from "./types"
+import type { InferResolvers } from "./types"
 import { type ContractTree, flatten } from "../core/contract"
 import { ChannelError } from "../core/error"
 import { parseWith } from "../core/schema"
@@ -109,35 +109,69 @@ type AnyRouter = {
 
 type ContextOf<R> = R extends Router<infer Context> ? Context : never
 
-// One router's required context, boxed so that intersecting several boxes intersects whole contexts
-// (a union context stays a union). Context-free routers box to nothing.
-type BoxedContext<R> = R extends AnyRouter
+// A router's required context as a parameter type, or nothing when it is context-free.
+// Distributes over a union-typed argument (`Router<A> | Router<B>`), one function per router, so a
+// union context stays whole.
+type ContextParameter<R> = R extends AnyRouter
   ? // oxlint-disable-next-line no-invalid-void-type -- void is the no-context sentinel, as in `DispatchOptions`
     [ContextOf<R>] extends [void]
     ? never
-    : { context: ContextOf<R> }
+    : (context: ContextOf<R>) => void
   : never
 
-// Every router's boxed context, intersected. Walks a tuple from both ends so a variadic tuple
-// (`[...routers, extra]`) keeps its fixed elements apart; an array of unknown length contributes
-// its element type once. A union-typed element (`Router<A> | Router<B>`) boxes to a union, which
-// is intersected too: either router may be the one that runs.
-type MergedBox<Routers extends readonly AnyRouter[]> = Routers extends readonly [
-  infer Head,
-  ...infer Tail extends readonly AnyRouter[],
-]
-  ? BoxOrNothing<UnionToIntersection<BoxedContext<Head>>> & MergedBox<Tail>
+// What one argument requires: inferring from a union of parameters intersects them, because either
+// router of a union-typed argument may be the one that runs. `unknown` when nothing is required,
+// so it drops out of the fold's intersection.
+type ArgumentContext<R> = [ContextParameter<R>] extends [never]
+  ? unknown
+  : ContextParameter<R> extends (context: infer Context) => void
+    ? Context
+    : never
+
+type RequiresContext<R> = [ContextParameter<R>] extends [never] ? false : true
+
+/**
+ * Folds every argument's context into `Merged`, tracking in `Required` whether any argument needs
+ * one. Walks a tuple from both ends so a variadic tuple (`[...routers, extra]`) keeps its fixed
+ * elements apart; an array of unknown length contributes its element type once.
+ */
+type FoldContexts<
+  Routers extends readonly AnyRouter[],
+  Merged,
+  Required extends boolean,
+> = Routers extends readonly [infer Head, ...infer Tail extends readonly AnyRouter[]]
+  ? FoldContexts<
+      Tail,
+      Merged & ArgumentContext<Head>,
+      Required extends true ? true : RequiresContext<Head>
+    >
   : Routers extends readonly [...infer Init extends readonly AnyRouter[], infer Last]
-    ? MergedBox<Init> & BoxOrNothing<UnionToIntersection<BoxedContext<Last>>>
-    : BoxOrNothing<UnionToIntersection<BoxedContext<Routers[number]>>>
+    ? FoldContexts<
+        Init,
+        Merged & ArgumentContext<Last>,
+        Required extends true ? true : RequiresContext<Last>
+      >
+    : Routers extends readonly []
+      ? FinishContext<Merged, Required>
+      : FinishContext<
+          Merged & ArgumentContext<Routers[number]>,
+          Required extends true ? true : RequiresContext<Routers[number]>
+        >
 
-type BoxOrNothing<Box> = [Box] extends [never] ? unknown : Box
-
-// Stands in for contexts no value satisfies at once (`{ kind: "user" }` and `{ kind: "guest" }`).
-// Their intersection is `never`, which `Router` reads as "no context", so it would make `dispatch`
-// callable with none. This keeps a context required but impossible to build, and its key is what
-// the compiler error shows.
+// Stands in for contexts no value satisfies at once (`{ kind: "user" }` and `{ kind: "guest" }`,
+// or the literals `"user"` and `"guest"`). Their intersection is `never`, which `Router` reads as
+// "no context", so it would make `dispatch` callable with none. This keeps a context required but
+// impossible to build, and its key is what the compiler error shows.
 type IncompatibleContexts = { "the merged routers' contexts are incompatible": never }
+
+// The flag, not the merged type, decides whether a context is required: an impossible
+// intersection and "nothing required" must not look alike.
+type FinishContext<Merged, Required extends boolean> = Required extends true
+  ? [Merged] extends [never]
+    ? IncompatibleContexts
+    : Merged
+  : // oxlint-disable-next-line no-invalid-void-type -- void is the no-context sentinel, as in `DispatchOptions`
+    void
 
 /**
  * The context of a merged router: the intersection of the routers' contexts, or `void` when none
@@ -146,13 +180,7 @@ type IncompatibleContexts = { "the merged routers' contexts are incompatible": n
  * to `never`) and let an `unknown` context absorb the others. The `void` fallback keeps `dispatch`
  * a `Transport` when nothing is required.
  */
-type MergedContext<Routers extends readonly AnyRouter[]> =
-  MergedBox<Routers> extends { context: infer Context }
-    ? [Context] extends [never]
-      ? IncompatibleContexts
-      : Context
-    : // oxlint-disable-next-line no-invalid-void-type -- void is the no-context sentinel, as in `DispatchOptions`
-      void
+type MergedContext<Routers extends readonly AnyRouter[]> = FoldContexts<Routers, unknown, false>
 
 /**
  * Serves several routers as one, so an edge that takes a single router (an IPC loop, `connect`,
