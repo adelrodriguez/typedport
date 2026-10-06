@@ -1,5 +1,11 @@
 # typedport
 
+## 0.4.0
+
+### Minor Changes
+
+- 32bfa6c: Resolvers take one object, `{ input, context, signal }`, instead of `input` plus `{ context, signal }`. A resolver that ignores its input no longer needs a placeholder parameter. Before: `(_input, { context }) => ...` and `({ id }, { signal }) => ...`. After: `({ context }) => ...` and `({ input: { id }, signal }) => ...`. `ResolverOptions<Context>` is renamed to `ResolverArgs<Input, Context>`.
+
 ## 0.3.0
 
 ### Minor Changes
