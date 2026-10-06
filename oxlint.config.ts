@@ -13,7 +13,8 @@ export default defineConfig({
   overrides: [
     {
       files: ["src/__tests__/types.test-d.ts"],
-      rules: { "typescript/no-unnecessary-type-parameters": "off" },
+      // Each type-level case sits in its own block, including ones that declare nothing.
+      rules: { "no-lone-blocks": "off" },
     },
   ],
 })
