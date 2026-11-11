@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> `typedport` has moved to [`@sanely/rpc`](https://www.npmjs.com/package/@sanely/rpc). Its code now lives in [adelrodriguez/sanely](https://github.com/adelrodriguez/sanely/tree/main/packages/rpc). This repository is archived, and `typedport` is deprecated on npm.
+
 <p align="center">
   <h1 align="center">🚌 <code>typedport</code></h1>
   <p align="center">
